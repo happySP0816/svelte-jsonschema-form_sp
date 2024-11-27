@@ -1,13 +1,17 @@
 <script lang="ts">
-  import { createOptions } from "../enum.js";
-  import { getFormContext } from "../context.js";
-  import { getTemplate } from "../templates/index.js";
-  import { getWidget } from "../widgets.js";
-  import { getErrors, validateField } from "../utils.js";
+  import { createOptions2 } from "../enum.js";
+  import {
+    getTemplate,
+    getWidget,
+    selectAttributes,
+    makeEventHandlers,
+    getErrors,
+    validateField,
+    getFormContext,
+    makePseudoId,
+  } from "../context/index.js";
 
   import type { FieldProps } from "./model.js";
-  import { selectAttributes } from "./make-widget-attributes.js";
-  import { makeEventHandlers } from './make-event-handlers.svelte.js';
 
   let {
     config,
@@ -25,7 +29,9 @@
   );
   const attributes = $derived(selectAttributes(ctx, config, handlers));
   const options = $derived(
-    createOptions(config.schema, config.uiSchema, config.uiOptions) ?? []
+    createOptions2(config.schema, config.idSchema, config.uiOptions, (i) =>
+      makePseudoId(ctx, config.idSchema.$id, i)
+    ) ?? []
   );
   const errors = $derived(getErrors(ctx, config.idSchema));
 </script>

@@ -1,15 +1,19 @@
 <script lang="ts">
   import { type Schema } from "@/core/index.js";
-  
-  import { getFormContext } from "../context.js";
-  import { getTemplate } from "../templates/index.js";
-  import { getWidget } from "../widgets.js";
-  import { getErrors, validateField } from '../utils.js';
-  import { createOptions } from '../enum.js';
+
+  import {
+    getTemplate,
+    getWidget,
+    inputAttributes,
+    makeEventHandlers,
+    getErrors,
+    validateField,
+    getFormContext,
+    makePseudoId,
+  } from "../context/index.js";
+  import { createOptions2, DEFAULT_BOOLEAN_ENUM } from "../enum.js";
 
   import type { FieldProps } from "./model.js";
-  import { inputAttributes } from "./make-widget-attributes.js";
-  import { makeEventHandlers } from './make-event-handlers.svelte.js';
 
   const ctx = getFormContext();
 
@@ -20,41 +24,49 @@
   const options = $derived.by(() => {
     const yes = ctx.translation("yes");
     const no = ctx.translation("no");
+    const computeId = (i: number) => makePseudoId(ctx, config.idSchema.$id, i);
     if (Array.isArray(config.schema.oneOf)) {
       return (
-        createOptions(
+        createOptions2(
           {
-            oneOf: config.schema.oneOf
-              .map((option): Schema | undefined => {
-                if (typeof option === "boolean") {
-                  return undefined;
-                }
-                return {
-                  ...option,
-                  title: option.title ?? (option.const === true ? yes : no),
-                };
-              })
-              .filter((s): s is Schema => s !== undefined),
+            oneOf: config.schema.oneOf.map((option): Schema => {
+              if (typeof option === "boolean") {
+                return option
+                  ? { const: true, title: yes }
+                  : { const: false, title: no };
+              }
+              return {
+                ...option,
+                title: option.title ?? (option.const === true ? yes : no),
+              };
+            }),
           },
-          config.uiSchema,
-          config.uiOptions
+          config.idSchema,
+          config.uiOptions,
+          computeId
         ) ?? []
       );
     }
-    const enumValues = config.schema.enum ?? [true, false];
+    const enumValues = config.schema.enum ?? DEFAULT_BOOLEAN_ENUM
     if (
       enumValues.length === 2 &&
       enumValues.every((v) => typeof v === "boolean") &&
       config.uiOptions?.enumNames === undefined
     ) {
-      return enumValues.map((v) => ({
+      return enumValues.map((v, i) => ({
+        id: makePseudoId(ctx, config.idSchema.$id, i),
         label: v ? yes : no,
         value: v,
         disabled: false,
       }));
     }
     return (
-      createOptions(config.schema, config.uiSchema, config.uiOptions) ?? []
+      createOptions2(
+        config.schema,
+        config.idSchema,
+        config.uiOptions,
+        computeId
+      ) ?? []
     );
   });
 

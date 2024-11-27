@@ -1,17 +1,22 @@
 <script lang="ts">
   import { isSchemaNullable, isSchemaObjectValue, type Schema } from '@/core/index.js';
   
-  import { getFormContext } from '../../context.js';
-  import { getComponent } from '../../component.js';
-  import { getTemplate } from '../../templates/index.js';
-  import { getDefaultFormState, getUiOptions, retrieveSchema } from '../../utils.js';
+  import {
+    getComponent,
+    getTemplate,
+    getField,
+    getDefaultFieldState,
+    getUiOptions,
+    retrieveSchema,
+    getFormContext,
+    makeIdSchema,
+    makeArrayItemId
+  } from '../../context/index.js';
   
-  import { getField, type FieldProps } from '../model.js';
+  import type { FieldProps } from '../model.js';
   
   import { getArrayContext } from './context.js';
-  import { makeHandler } from './make-click-handler.js';
   import { getArrayItemName, getFixedArrayItemTitle } from './get-array-item-name.js'
-  import { getArrayItemSchemaId } from './get-array-item-schema-id.js'
 
   let { value = $bindable(), config }: FieldProps<"fixedArray"> = $props()
 
@@ -54,15 +59,16 @@
     {config}
     type="array-item-add"
     attributes={config.uiOptions?.button}
-    disabled={arrayCtx.disabledOrReadonly}
-    onclick={makeHandler(() => {
+    disabled={arrayCtx.disabled}
+    onclick={(e) => {
+      e.preventDefault();
       if (!schemaAdditionalItems || value === undefined) {
         return
       }
-      value.push(getDefaultFormState(ctx, schemaAdditionalItems, undefined))
-    })}
+      value.push(getDefaultFieldState(ctx, schemaAdditionalItems, undefined))
+    }}
   >
-    {ctx.translation("add-array-item")}
+    <ctx.IconOrTranslation data={["add-array-item"]} />
   </Button>
 {/snippet}
 <Template
@@ -82,11 +88,10 @@
         ? uiSchema.items[index]
         : uiSchema.items
       ) ?? {}}
-      {@const itemIdSchema = getArrayItemSchemaId(
+      {@const itemIdSchema = makeIdSchema(
         ctx,
-        config.idSchema,
         itemSchema,
-        index,
+        makeArrayItemId(ctx, config.idSchema.$id, index),
         item
       )}
       <ArrayItem
@@ -102,9 +107,10 @@
         }}
         bind:arr={value}
         bind:value={value[index]}
-        canRemove={isAdditional}
-        canMoveUp={index > schemaItems.length}
-        canMoveDown={isAdditional && index < value.length - 1}
+        canCopy={arrayCtx.copyable && isAdditional && arrayCtx.canAdd}
+        canRemove={arrayCtx.removable && isAdditional}
+        canMoveUp={arrayCtx.orderable && index > schemaItems.length}
+        canMoveDown={arrayCtx.orderable && isAdditional && index < value.length - 1}
       />
     {/each}
   {/if}

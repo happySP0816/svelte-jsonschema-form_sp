@@ -1,0 +1,57 @@
+---
+title: State transformation
+sidebar:
+  order: 3
+---
+
+In some cases it may be necessary to transform the form state before it is passed to the validator.
+
+You can do this by providing `getSnapshot` attribute.
+
+## Omit extra data
+
+One of the transformation options you can apply is deleting unnecessary data.
+
+For this you can use `omitExtraData` function.
+
+:::note
+
+Currently function `omitExtraData` is imported from `@sjsf/form/legacy-omit-extra-data` and
+will be deprecated because it's implementation does not meet the requirements of our code base.
+
+It will be replaced with `@sjsf/form/omit-extra-data` import in the major release.
+
+:::
+
+```svelte
+<script lang="ts">
+  import { defaultMerger } from '@sjsf/form/core'
+  import { useForm2 } from "@sjsf/form";
+  import { translation } from "@sjsf/form/translations/en";
+  import { theme } from "@sjsf/form/basic-theme";
+  import { omitExtraData2 } from "@sjsf/form/legacy-omit-extra-data";
+
+  import { schema, uiSchema, initialValue } from "./schema";
+  import { validator } from "./validator";
+  import { transform } from "./transform";
+  
+  const form = useForm2({
+    ...theme,
+    initialValue,
+    schema,
+    uiSchema,
+    validator,
+    translation,
+    getSnapshot() {
+      return omitExtraData2(validator, defaultMerger, schema, $state.snapshot(form.formValue))
+    },
+    onSubmit(value) {
+      console.log("transformed", value);
+    },
+    onSubmitError(errors, _, value) {
+      console.log("errors", errors);
+      console.log("transformed", value);
+    }
+  })
+</script>
+```

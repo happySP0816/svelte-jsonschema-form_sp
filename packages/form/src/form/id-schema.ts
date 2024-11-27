@@ -6,6 +6,7 @@ import { deepEqual } from "@/lib/deep-equal.js";
 
 import {
   ALL_OF_KEY,
+  defaultMerger,
   DEPENDENCIES_KEY,
   getSimpleSchemaType,
   ID_KEY,
@@ -15,7 +16,9 @@ import {
   ITEMS_KEY,
   PROPERTIES_KEY,
   REF_KEY,
-  retrieveSchema,
+  retrieveSchema2,
+  type Merger2,
+  type Path,
   type Schema,
   type SchemaObjectValue,
   type SchemaValue,
@@ -23,7 +26,10 @@ import {
 } from "@/core/index.js";
 
 export const DEFAULT_ID_PREFIX = "root";
-export const DEFAULT_ID_SEPARATOR = "_";
+
+export const DEFAULT_ID_SEPARATOR = ".";
+
+export const DEFAULT_PSEUDO_ID_SEPARATOR = "::";
 
 export type FieldId = {
   $id: string;
@@ -40,6 +46,9 @@ export const FAKE_ID_SCHEMA: IdSchema<SchemaValue> = {
   $id: "fake-id",
 };
 
+/**
+ * @deprecated use `toIdSchema2`
+ */
 export function toIdSchema(
   validator: Validator,
   schema: Schema,
@@ -48,19 +57,51 @@ export function toIdSchema(
   _recurseList: Schema[],
   id?: string | null,
   rootSchema?: Schema,
+  formData?: SchemaValue,
+  merger = defaultMerger
+): IdSchema<SchemaValue> {
+  return toIdSchema2(
+    validator,
+    merger,
+    schema,
+    idPrefix,
+    idSeparator,
+    _recurseList,
+    id,
+    rootSchema,
+    formData
+  );
+}
+
+export function toIdSchema2(
+  validator: Validator,
+  merger: Merger2,
+  schema: Schema,
+  idPrefix: string,
+  idPropertySeparator: string,
+  _recurseList: Schema[],
+  id?: string | null,
+  rootSchema?: Schema,
   formData?: SchemaValue
 ): IdSchema<SchemaValue> {
   if (REF_KEY in schema || DEPENDENCIES_KEY in schema || ALL_OF_KEY in schema) {
-    const _schema = retrieveSchema(validator, schema, rootSchema, formData);
+    const _schema = retrieveSchema2(
+      validator,
+      merger,
+      schema,
+      rootSchema,
+      formData
+    );
     const sameSchemaIndex = _recurseList.findIndex((item) =>
       deepEqual(item, _schema)
     );
     if (sameSchemaIndex === -1) {
-      return toIdSchema(
+      return toIdSchema2(
         validator,
+        merger,
         _schema,
         idPrefix,
-        idSeparator,
+        idPropertySeparator,
         _recurseList.concat(_schema),
         id,
         rootSchema,
@@ -71,11 +112,12 @@ export function toIdSchema(
   if (ITEMS_KEY in schema) {
     const items = schema[ITEMS_KEY];
     if (isNormalArrayItems(items) && !items[REF_KEY]) {
-      return toIdSchema(
+      return toIdSchema2(
         validator,
+        merger,
         items,
         idPrefix,
-        idSeparator,
+        idPropertySeparator,
         _recurseList,
         id,
         rootSchema,
@@ -83,19 +125,20 @@ export function toIdSchema(
       );
     }
   }
-  const $id = id || idPrefix;
+  const $id = id ?? idPrefix;
   const idSchema = { $id } as IdSchema<SchemaObjectValue>;
   if (getSimpleSchemaType(schema) === "object" && PROPERTIES_KEY in schema) {
     const properties = schema[PROPERTIES_KEY];
     const formDataObject = isSchemaObjectValue(formData) ? formData : undefined;
     for (const name in properties) {
       const field = properties[name]!;
-      const fieldId = idSchema[ID_KEY] + idSeparator + name;
-      idSchema[name] = toIdSchema(
+      const fieldId = idSchema[ID_KEY] + idPropertySeparator + name;
+      idSchema[name] = toIdSchema2(
         validator,
+        merger,
         isSchema(field) ? field : {},
         idPrefix,
-        idSeparator,
+        idPropertySeparator,
         _recurseList,
         fieldId,
         rootSchema,
@@ -110,11 +153,31 @@ export interface IdentifiableFieldElement {
   help: {};
   "key-input": {};
   examples: {};
+  oneof: {};
+  anyof: {};
 }
 
+/**
+ * @deprecated use `computePseudoId`
+ */
 export function computeId<T>(
   idSchema: IdSchema<T>,
-  element: keyof IdentifiableFieldElement | string
+  element: keyof IdentifiableFieldElement | number,
+  pseudoIdSeparator = DEFAULT_PSEUDO_ID_SEPARATOR
 ) {
-  return `${idSchema.$id}__${element}`;
+  return computePseudoId(pseudoIdSeparator, idSchema.$id, element);
+}
+
+export function computePseudoId(
+  pseudoIdSeparator: string,
+  instanceId: string,
+  element: keyof IdentifiableFieldElement | number
+) {
+  return `${instanceId}${pseudoIdSeparator}${element}`;
+}
+
+export function pathToId(idPrefix: string, idSeparator: string, path: Path) {
+  return path.length === 0
+    ? idPrefix
+    : `${idPrefix}${idSeparator}${path.join(idSeparator)}`;
 }

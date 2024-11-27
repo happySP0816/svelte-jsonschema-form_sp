@@ -7,12 +7,17 @@
     mergeSchemaObjects,
   } from "@/core/index.js";
 
-  import { FAKE_ID_SCHEMA } from '../id-schema.js';
-  import { getComponent } from "../component.js";
-  import { getFormContext } from "../context.js";
-  import { getErrors, isSelect, toIdSchema } from "../utils.js";
+  import { FAKE_ID_SCHEMA } from "../id-schema.js";
+  import {
+    getComponent,
+    getField,
+    getErrors,
+    isSelect,
+    makeIdSchema,
+    getFormContext,
+  } from "../context/index.js";
 
-  import { getField, type FieldProps } from "./model.js";
+  import type { FieldProps } from "./model.js";
 
   const ctx = getFormContext();
 
@@ -44,7 +49,7 @@
   const MultiField = $derived(getField(ctx, "multi", config));
   const fieldIdSchema = $derived.by(() => {
     const isFake = config.idSchema === FAKE_ID_SCHEMA;
-    const nextIdSchema = toIdSchema(
+    const nextIdSchema = makeIdSchema(
       ctx,
       config.schema,
       isFake ? undefined : config.idSchema[ID_KEY],

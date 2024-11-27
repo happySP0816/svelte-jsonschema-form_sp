@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { getFormContext } from '../../context.js';
-  import { getTemplate } from '../../templates/index.js';
-  import { getComponent } from '../../component.js';
-  import { getErrors } from '../../utils.js';
+  import {
+    getField,
+    getTemplate,
+    getComponent,
+    getErrors,
+    getFormContext,
+    isDisabled
+  } from '../../context/index.js';
 
-  import { getField, type FieldProps } from '../model.js';
-  import { isDisabledOrReadonly } from '../../is-disabled-or-readonly.js'
+  import type { FieldProps } from '../model.js';
   
   import ObjectKeyInput from './object-key-input.svelte';
 
@@ -22,8 +25,8 @@
   const Template = $derived(getTemplate(ctx, "object-property", config))
   const Field = $derived(getField(ctx, "root", config))
   const Button = $derived(getComponent(ctx, "button", config))
-  const disabledOrReadonly = $derived(
-    isDisabledOrReadonly(ctx, config.uiOptions?.input)
+  const disabled = $derived(
+    isDisabled(ctx, config.uiOptions?.input)
   )
   const errors = $derived(getErrors(ctx, config.idSchema))
 </script>
@@ -41,14 +44,14 @@
   <Button
     {errors}
     {config}
+    {disabled}
     type="object-property-remove"
-    disabled={disabledOrReadonly}
     onclick={(e) => {
       e.preventDefault();
       delete obj[property]
     }}
   >
-    {ctx.translation("remove-object-property")}
+    <ctx.IconOrTranslation data={["remove-object-property"]} />
   </Button>
 {/snippet}
 <Template

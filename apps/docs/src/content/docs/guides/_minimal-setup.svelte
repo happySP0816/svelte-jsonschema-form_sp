@@ -1,34 +1,23 @@
 <script lang="ts">
-  import Ajv from "ajv";
-  import { Form, type Schema } from "@sjsf/form";
+  import { type Schema, useForm2, SimpleForm } from "@sjsf/form";
   import { translation } from "@sjsf/form/translations/en";
   import { theme } from "@sjsf/form/basic-theme";
-  import {
-    AjvValidator,
-    addFormComponents,
-    DEFAULT_AJV_CONFIG,
-  } from "@sjsf/ajv8-validator";
+  import { createValidator } from "@sjsf/ajv8-validator";
 
-  const validator = new AjvValidator(
-    addFormComponents(new Ajv(DEFAULT_AJV_CONFIG))
-  );
+  const validator = createValidator();
 
   const schema: Schema = {
-    type: "object",
-    title: "Mini form",
-    properties: {
-      text: {
-        type: "string",
-      }
-    },
-    required: ["text"],
-  }
+    type: "string",
+    title: "Simple text input",
+  };
+
+  const form = useForm2({
+    ...theme,
+    schema,
+    validator,
+    translation,
+    onSubmit: console.log,
+  });
 </script>
 
-<Form
-  {...theme}
-  {schema}
-  {validator}
-  {translation}
-  onsubmit={(e) => e.preventDefault()}
-/>
+<SimpleForm {form} style="display: flex; flex-direction: column; gap: 1rem" />

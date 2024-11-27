@@ -1,6 +1,6 @@
 {
   "name": "@sjsf/ajv8-validator",
-  "version": "0.1.0",
+  "version": "1.6.1",
   "description": "The ajv-8 based validator for svelte-jsonschema-form",
   "license": "MIT",
   "keywords": [
@@ -28,17 +28,20 @@
     "build": "tsc && publint",
     "dev": "tsc --watch"
   },
+  "types": "dist/index.d.ts",
+  "main": "dist/index.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "svelte": "./dist/index.js"
     }
   },
   "peerDependencies": {
-    "@sjsf/form": "workspace:^0.1.0",
-    "ajv": "catalog:"
+    "@sjsf/form": "workspace:^1.6.1",
+    "ajv": "^8.0.0"
   },
   "devDependencies": {
+    "ajv": "catalog:",
     "@sjsf/form": "workspace:*"
   }
 }

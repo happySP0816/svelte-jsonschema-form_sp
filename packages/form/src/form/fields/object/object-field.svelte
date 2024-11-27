@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
+  import { deepEqual } from '@/lib/deep-equal.js'
   import {
     getDefaultValueForType,
     getSimpleSchemaType,
@@ -6,22 +9,25 @@
     isSchemaExpandable,
     isSchemaObjectValue,
     orderProperties,
+    type Schema,
+    type SchemaObjectValue,
   } from '@/core/index.js';
 
   import type { UiSchema } from '../../ui-schema.js';
   import { FAKE_ID_SCHEMA } from '../../id-schema.js';
-    import { getFormContext } from "../../context.js";
-  import { getTemplate } from '../../templates/index.js';
-  import { getComponent } from '../../component.js';
-  import { isDisabledOrReadonly } from '../../is-disabled-or-readonly.js';
   import {
-    getDefaultFormState,
+    getTemplate,
+    getComponent,
+    isDisabled,
+    getField,
+    getDefaultFieldState,
     getErrors,
     getUiOptions,
     retrieveSchema,
-  } from "../../utils.js";
+    getFormContext
+  } from "../../context/index.js";
 
-  import { getField, type FieldProps } from "../model.js";
+  import type { FieldProps } from "../model.js";
 
   import { setObjectContext, type ObjectContext } from './context.js';
   import { generateNewKey } from './generate-new-object-key.js';
@@ -33,12 +39,6 @@
     config,
     value = $bindable(),
   }: FieldProps<"object"> = $props();
-  $effect(() => {
-    if (value === undefined) {
-      value = {}
-    }
-  })
-  
   const newKeySeparator = $derived(config.uiOptions?.duplicateKeySuffixSeparator ?? "-")
   const objCtx: ObjectContext = {
     get newKeySeparator() {
@@ -47,21 +47,39 @@
   }
   setObjectContext(objCtx)
   
-  // TODO: Is it required? Seems like `root` field will always do the same thing
+  // NOTE: This is required for computing a schema which will include all additional properties
+  //       in the `properties` field with the `ADDITIONAL_PROPERTY_FLAG` flag and
+  //       `dependencies` resolution.
   const retrievedSchema = $derived(retrieveSchema(ctx, config.schema, value))
   const requiredProperties = $derived(new Set(retrievedSchema.required));
-  const schemaProperties = $derived(retrievedSchema.properties);
+
+  let lastSchemaProperties: Schema['properties'] = undefined
+  const schemaProperties = $derived.by(() => {
+    if (!deepEqual(lastSchemaProperties, retrievedSchema.properties)) {
+      lastSchemaProperties = $state.snapshot(retrievedSchema.properties)
+    }
+    return lastSchemaProperties
+  });
+  // This code should populate `defaults` for properties from `dependencies` before new `fields`
+  // will populate their `defaults`.
+  $effect.pre(() => {
+    schemaProperties;
+    untrack(() => {
+      value = getDefaultFieldState(ctx, retrievedSchema, value) as SchemaObjectValue
+    });
+  })
+
   const schemaPropertiesOrder = $derived(
     isSchemaObjectValue(schemaProperties)
-    ? orderProperties(schemaProperties, config.uiOptions?.order ?? createOriginalKeysOrder(schemaProperties))
-    : []
+      ? orderProperties(schemaProperties, config.uiOptions?.order ?? createOriginalKeysOrder(schemaProperties))
+      : []
   );
 
   const ObjectProperty = $derived(getField(ctx, "objectProperty", config));
   const Template = $derived(getTemplate(ctx, "object", config));
   const Button = $derived(getComponent(ctx, "button", config));
   
-  const disabledOrReadOnly = $derived(isDisabledOrReadonly(ctx, config.uiOptions?.input))
+  const disabled = $derived(isDisabled(ctx, config.uiOptions?.input))
   
   const schemaAdditionalProperties = $derived(
     isSchemaObjectValue(retrievedSchema.additionalProperties) ? retrieveSchema(ctx, retrievedSchema.additionalProperties, value) : {}
@@ -75,7 +93,7 @@
     type="object-property-add"
     {config}
     {errors}
-    disabled={disabledOrReadOnly}
+    {disabled}
     attributes={config.uiOptions?.button}
     onclick={(e) => {
       e.preventDefault();
@@ -84,11 +102,11 @@
         return
       }
       const newKey = generateNewKey("newKey", newKeySeparator, value)
-      value[newKey] = getDefaultFormState(ctx, schemaAdditionalProperties, undefined)
+      value[newKey] = getDefaultFieldState(ctx, schemaAdditionalProperties, undefined)
         ?? getDefaultValueForType(getSimpleSchemaType(schemaAdditionalProperties))
     }}
   >
-    {ctx.translation("add-object-property")}
+    <ctx.IconOrTranslation data={["add-object-property"]} />
   </Button>
 {/snippet}
 <Template
@@ -100,9 +118,11 @@
   {#if schemaProperties !== undefined && value !== undefined}
     {#each schemaPropertiesOrder as property (property)}
       {@const isAdditional = isAdditionalProperty(schemaProperties, property)}
-      {@const propSchema = schemaProperties[property]!}
+      {@const propSchemaDefinition = schemaProperties[property] ?? false}
+      {@const propSchema = typeof propSchemaDefinition === "boolean" ? {} : propSchemaDefinition}
       {@const propUiSchema =
         (isAdditional ? config.uiSchema.additionalProperties : config.uiSchema[property]) as UiSchema ?? {}}
+      {@const propUiOptions = getUiOptions(ctx, propUiSchema)}
       <ObjectProperty
         {property}
         {isAdditional}
@@ -110,10 +130,10 @@
         bind:value={value[property]}
         config={{
           name: property,
-          title: property,
-          schema: typeof propSchema === "boolean" ? {} : propSchema,
+          title: propUiOptions?.title ?? propSchema.title ?? property,
+          schema: propSchema,
           uiSchema: propUiSchema,
-          uiOptions: getUiOptions(ctx, propUiSchema),
+          uiOptions: propUiOptions,
           idSchema: config.idSchema[property] ?? FAKE_ID_SCHEMA,
           required: requiredProperties.has(property),
         }}

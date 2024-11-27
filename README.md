@@ -18,45 +18,38 @@ npm install @sjsf/form @sjsf/ajv8-validator ajv@8
 
 ```svelte
 <script lang="ts">
-  import Ajv from 'ajv';
-  import { Form } from '@sjsf/form';
+  import { useForm2, SimpleForm, type Schema } from '@sjsf/form';
   import { translation } from '@sjsf/form/translations/en';
   import { theme } from '@sjsf/form/basic-theme';
-  import {
-    AjvValidator,
-    addFormComponents,
-    DEFAULT_AJV_CONFIG,
-  } from "@sjsf/ajv8-validator";
+  import { createValidator } from "@sjsf/ajv8-validator";
 
-  const validator = new AjvValidator(
-    addFormComponents(new Ajv(DEFAULT_AJV_CONFIG))
-  );
+  const validator = createValidator();
+
+  const schema: Schema = {
+    type: 'object',
+    properties: {
+      name: {
+        type: 'string',
+        title: 'Name',
+      },
+      description: {
+        type: 'string',
+        title: 'Description',
+      },
+    },
+    required: ["name"]
+  }
+
+  const form = useForm2({
+    ...theme,
+    schema,
+    validator,
+    translation,
+    onSubmit: console.log,
+  })
 </script>
 
-<Form
-  {...theme}
-  schema={{
-    title: 'Tasks',
-    type: 'array',
-    items: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          title: 'Name',
-        },
-        description: {
-          type: 'string',
-          title: 'Description',
-        },
-      },
-      required: ["name"]
-    },
-  }}
-  {validator}
-  {translation}
-  onSubmit={console.log}
-/>
+<SimpleForm {form} />
 ```
 
 ## License

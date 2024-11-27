@@ -3,23 +3,23 @@
 
 	let { attributes, value = $bindable(), options, errors }: WidgetProps<'checkboxes'> = $props();
 
-	const guarder = multipleOptions({
+	const mapped = multipleOptions({
 		mapper: () => indexMapper(options),
 		value: () => value,
 		update: (v) => (value = v),
-		readonly: () => attributes.readonly
 	});
 </script>
 
-{#each options as option, index (option.value)}
+{#each options as option, index (option.id)}
 	<label class="label cursor-pointer gap-2 justify-start">
 		<input
 			type="checkbox"
-			class="checkbox checkbox-sm"
+			class="checkbox"
 			class:checkbox-error={errors.length}
-			bind:group={guarder.value}
+			bind:group={mapped.value}
 			value={index}
 			{...attributes}
+			id={option.id}
 			disabled={option.disabled || attributes.disabled}
 		/>
 		<span class="label-text">{option.label}</span>

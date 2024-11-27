@@ -13,15 +13,19 @@ import {
 } from "vitest";
 
 import {
-  getDefaultFormState,
+  getDefaultFormState2,
   AdditionalItemsHandling,
-  computeDefaults,
+  computeDefaults3,
   getInnerSchemaForArrayItem,
+  getArrayDefaults,
+  getObjectDefaults,
+  getDefaultBasedOnSchemaType,
 } from "./default-state.js";
 import { RECURSIVE_REF, RECURSIVE_REF_ALLOF } from "./fixtures/test-data.js";
 import type { Validator } from "./validator.js";
 import type { Schema } from "./schema.js";
 import { makeTestValidator } from "./test-validator.js";
+import { defaultMerger } from "./merger.js";
 
 let testValidator: Validator;
 
@@ -29,13 +33,166 @@ beforeEach(() => {
   testValidator = makeTestValidator();
 });
 
-describe("getDefaultFormState()", () => {
+const defaults = {
+  isSchemaRoot: true,
+  rootSchema: {},
+  includeUndefinedValues: false,
+  stack: new Set<string>(),
+  required: false,
+  parentDefaults: undefined,
+  experimental_defaultFormStateBehavior: {},
+  rawFormData: undefined,
+};
+
+describe("getDefaultFormState2()", () => {
   let consoleWarnSpy: MockInstance<typeof console.warn>;
   beforeAll(() => {
     consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {}); // mock this to avoid actually warning in the tests
   });
   afterAll(() => {
     consoleWarnSpy.mockRestore();
+  });
+  it("test an object const value merge with formData", () => {
+    const schema: Schema = {
+      type: "object",
+      properties: {
+        localConst: {
+          type: "string",
+          const: "local",
+        },
+        RootConst: {
+          type: "object",
+          properties: {
+            attr1: {
+              type: "number",
+            },
+            attr2: {
+              type: "boolean",
+            },
+          },
+          const: {
+            attr1: 1,
+            attr2: true,
+          },
+        },
+        RootAndLocalConst: {
+          type: "string",
+          const: "FromLocal",
+        },
+        fromFormData: {
+          type: "string",
+        },
+      },
+      const: {
+        RootAndLocalConst: "FromRoot",
+      },
+    };
+    expect(
+      getDefaultFormState2(
+        testValidator,
+        defaultMerger,
+        schema,
+        {
+          fromFormData: "fromFormData",
+        },
+        schema,
+        false,
+        { emptyObjectFields: "skipDefaults" }
+      )
+    ).toEqual({
+      localConst: "local",
+      RootConst: {
+        attr1: 1,
+        attr2: true,
+      },
+      RootAndLocalConst: "FromLocal",
+      fromFormData: "fromFormData",
+    });
+  });
+  it("test an object with deep nested dependencies with formData", () => {
+    const schema: Schema = {
+      type: "object",
+      properties: {
+        nestedObject: {
+          type: "object",
+          properties: {
+            first: {
+              type: "string",
+              enum: ["no", "yes"],
+              default: "no",
+            },
+          },
+          dependencies: {
+            first: {
+              oneOf: [
+                {
+                  properties: {
+                    first: {
+                      enum: ["yes"],
+                    },
+                    second: {
+                      type: "object",
+                      properties: {
+                        deeplyNestedThird: {
+                          type: "string",
+                          enum: ["before", "after"],
+                          default: "before",
+                        },
+                      },
+                    },
+                  },
+                },
+                {
+                  properties: {
+                    first: {
+                      enum: ["no"],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    // Mock isValid so that withExactlyOneSubschema works as expected
+    testValidator = makeTestValidator({
+      isValid: [
+        true, // First oneOf... first === first
+        false, // Second oneOf... second !== first
+      ],
+    });
+    expect(
+      getDefaultFormState2(
+        testValidator,
+        defaultMerger,
+        schema,
+        {
+          nestedObject: {
+            first: "yes",
+          },
+        },
+        schema,
+        false,
+        {
+          emptyObjectFields: "populateAllDefaults",
+          allOf: "skipDefaults",
+          arrayMinItems: {
+            populate: "populate" as any,
+            mergeExtraDefaults: false,
+          },
+          mergeDefaultsIntoFormData: "useFormDataIfPresent",
+        }
+      )
+    ).toEqual({
+      nestedObject: {
+        first: "yes",
+        second: {
+          deeplyNestedThird: "before",
+        },
+      },
+    });
   });
   it("getInnerSchemaForArrayItem() item of type boolean returns empty schema", () => {
     expect(
@@ -46,7 +203,7 @@ describe("getDefaultFormState()", () => {
       )
     ).toEqual({});
   });
-  describe("computeDefaults()", () => {
+  describe("computeDefaults2()", () => {
     it("test computeDefaults that is passed a schema with a ref", () => {
       const schema: Schema = {
         definitions: {
@@ -66,9 +223,31 @@ describe("getDefaultFormState()", () => {
         $ref: "#/definitions/testdef",
       };
       expect(
-        computeDefaults(testValidator, schema, { rootSchema: schema })
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+        })
       ).toEqual({
         foo: 42,
+      });
+    });
+    it("test computeDefaults that is passed a schema with a const property", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            type: "string",
+            const: "test",
+          },
+        },
+      };
+      expect(
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+        })
+      ).toEqual({
+        test: "test",
       });
     });
     it("test an object with an optional property that has a nested required property", () => {
@@ -92,7 +271,10 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, { rootSchema: schema })
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+        })
       ).toEqual({ requiredProperty: "foo" });
     });
     it("test an object with an optional property that has a nested required property with default", () => {
@@ -117,7 +299,10 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, { rootSchema: schema })
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+        })
       ).toEqual({
         requiredProperty: "foo",
         optionalProperty: { nestedRequiredProperty: "" },
@@ -149,7 +334,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: true,
         })
@@ -191,7 +377,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: "excludeObjectChildren",
         })
@@ -219,7 +406,10 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, { rootSchema: schema })
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+        })
       ).toEqual({
         requiredProperty: "foo",
         foo: "bar",
@@ -243,7 +433,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: true,
         })
@@ -283,7 +474,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: { test: { foo: "x", newKey: {} } },
         })
@@ -325,7 +517,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: { test: { foo: "x", newKey: {} } },
         })
@@ -364,10 +557,1090 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: {},
         })
+      ).toEqual({});
+    });
+    it("test an object with deep nested dependencies with formData", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          nestedObject: {
+            type: "object",
+            properties: {
+              first: {
+                type: "string",
+                enum: ["no", "yes"],
+                default: "no",
+              },
+            },
+            dependencies: {
+              first: {
+                oneOf: [
+                  {
+                    properties: {
+                      first: {
+                        enum: ["yes"],
+                      },
+                      second: {
+                        type: "object",
+                        properties: {
+                          deeplyNestedThird: {
+                            type: "string",
+                            enum: ["before", "after"],
+                            default: "before",
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    properties: {
+                      first: {
+                        enum: ["no"],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      };
+
+      // Mock isValid so that withExactlyOneSubschema works as expected
+      testValidator = makeTestValidator({
+        isValid: [
+          true, // First oneOf... first === first
+          false, // Second oneOf... second !== first
+        ],
+      });
+      expect(
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+          rawFormData: {
+            nestedObject: {
+              first: "yes",
+            },
+          },
+        })
+      ).toEqual({
+        nestedObject: {
+          first: "no",
+          second: {
+            deeplyNestedThird: "before",
+          },
+        },
+      });
+    });
+    it("test an array with defaults with no formData", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        default: ["Raphael", "Michaelangelo"],
+        items: {
+          type: "string",
+          default: "Unknown",
+        },
+      };
+
+      expect(
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+          includeUndefinedValues: "excludeObjectChildren",
+        })
+      ).toEqual(["Raphael", "Michaelangelo", "Unknown", "Unknown"]);
+    });
+    it("test an array with defaults with empty array as formData", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        default: ["Raphael", "Michaelangelo"],
+        items: {
+          type: "string",
+          default: "Unknown",
+        },
+      };
+
+      expect(
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+          rawFormData: [],
+          includeUndefinedValues: "excludeObjectChildren",
+          experimental_defaultFormStateBehavior: {
+            arrayMinItems: {
+              mergeExtraDefaults: true,
+              populate: "all",
+            },
+          },
+        })
+      ).toEqual(["Raphael", "Michaelangelo", "Unknown", "Unknown"]);
+    });
+    it("test computeDefaults handles an invalid property schema", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          invalidProperty: "not a valid property value",
+        },
+      } as Schema;
+      expect(
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
+          rootSchema: schema,
+          includeUndefinedValues: "excludeObjectChildren",
+        })
+      ).toEqual({});
+    });
+    it("test with a recursive schema", () => {
+      expect(
+        computeDefaults3(testValidator, defaultMerger, RECURSIVE_REF, {
+          ...defaults,
+          rootSchema: RECURSIVE_REF,
+        })
+      ).toEqual({
+        name: "",
+      });
+    });
+    it("test with a recursive allof schema", () => {
+      expect(
+        computeDefaults3(testValidator, defaultMerger, RECURSIVE_REF_ALLOF, {
+          ...defaults,
+          rootSchema: RECURSIVE_REF_ALLOF,
+        })
+      ).toEqual({
+        value: [undefined],
+      });
+    });
+    it("test computeDefaults returns undefined with simple schema and no optional args", () => {
+      const schema: Schema = { type: "string" };
+      expect(
+        computeDefaults3(testValidator, defaultMerger, schema, defaults)
+      ).toBe(undefined);
+    });
+  });
+  describe("getDefaultBasedOnSchemaType()", () => {
+    it("test an object with an optional property that has a nested required property", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "string",
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+          },
+          undefined
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+      });
+    });
+    it("test an object with an optional property that has a nested required property with default", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "string",
+                default: "",
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+          },
+          undefined
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+        optionalProperty: { nestedRequiredProperty: "" },
+      });
+    });
+    it("test an object with an optional property that has a nested required property and includeUndefinedValues", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "object",
+                properties: {
+                  undefinedProperty: {
+                    type: "string",
+                  },
+                },
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: true,
+          },
+          undefined
+        )
+      ).toEqual({
+        optionalProperty: {
+          nestedRequiredProperty: {
+            undefinedProperty: undefined,
+          },
+        },
+        requiredProperty: "foo",
+      });
+    });
+    it("test an object with an optional property that has a nested required property and includeUndefinedValues is 'excludeObjectChildren'", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalNumberProperty: {
+            type: "number",
+          },
+          optionalObjectProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "object",
+                properties: {
+                  undefinedProperty: {
+                    type: "string",
+                  },
+                },
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          undefined
+        )
+      ).toEqual({
+        optionalNumberProperty: undefined,
+        optionalObjectProperty: {
+          nestedRequiredProperty: {},
+        },
+        requiredProperty: "foo",
+      });
+    });
+    it("test an object const value populate as field defaults", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          localConst: {
+            type: "string",
+            const: "local",
+          },
+          RootConst: {
+            type: "object",
+            properties: {
+              attr1: {
+                type: "number",
+              },
+              attr2: {
+                type: "boolean",
+              },
+            },
+            const: {
+              attr1: 1,
+              attr2: true,
+            },
+          },
+          fromFormData: {
+            type: "string",
+            default: "notUsed",
+          },
+          RootAndLocalConst: {
+            type: "string",
+            const: "FromLocal",
+          },
+        },
+        const: {
+          RootAndLocalConst: "FromRoot",
+        },
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            experimental_defaultFormStateBehavior: {
+              emptyObjectFields: "skipDefaults",
+            },
+            rawFormData: {
+              fromFormData: "fromFormData",
+            },
+          },
+          undefined
+        )
+      ).toEqual({
+        localConst: "local",
+        RootConst: {
+          attr1: 1,
+          attr2: true,
+        },
+        RootAndLocalConst: "FromLocal",
+      });
+    });
+    it("test an object with an additionalProperties", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        additionalProperties: true,
+        required: ["requiredProperty"],
+        default: {
+          foo: "bar",
+        },
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+          },
+          { foo: "bar" }
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+        foo: "bar",
+      });
+    });
+    it("test an object with an additionalProperties and includeUndefinedValues", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        additionalProperties: {
+          type: "string",
+        },
+        required: ["requiredProperty"],
+        default: {
+          foo: "bar",
+        },
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          { ...defaults, rootSchema: schema, includeUndefinedValues: true },
+          { foo: "bar" }
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+        foo: "bar",
+      });
+    });
+    it("test an object with additionalProperties type object with defaults and formdata", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            title: "Test",
+            type: "object",
+            properties: {
+              foo: {
+                type: "string",
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              properties: {
+                host: {
+                  title: "Host",
+                  type: "string",
+                  default: "localhost",
+                },
+                port: {
+                  title: "Port",
+                  type: "integer",
+                  default: 389,
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            rawFormData: { test: { foo: "x", newKey: {} } },
+          },
+          undefined
+        )
+      ).toEqual({
+        test: {
+          newKey: {
+            host: "localhost",
+            port: 389,
+          },
+        },
+      });
+    });
+    it("test an object with additionalProperties type object with no defaults and formdata", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            title: "Test",
+            type: "object",
+            properties: {
+              foo: {
+                type: "string",
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              properties: {
+                host: {
+                  title: "Host",
+                  type: "string",
+                },
+                port: {
+                  title: "Port",
+                  type: "integer",
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            rawFormData: { test: { foo: "x", newKey: {} } },
+          },
+          undefined
+        )
+      ).toEqual({
+        test: {
+          newKey: {},
+        },
+      });
+    });
+    it("test an object with additionalProperties type object with no defaults and non-object formdata", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            title: "Test",
+            type: "object",
+            properties: {
+              foo: {
+                type: "string",
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              properties: {
+                host: {
+                  title: "Host",
+                  type: "string",
+                },
+                port: {
+                  title: "Port",
+                  type: "integer",
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            rawFormData: {},
+          },
+          undefined
+        )
+      ).toEqual({});
+    });
+    it("test an array with defaults", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        default: ["Raphael", "Michaelangelo"],
+        items: {
+          type: "string",
+          default: "Unknown",
+        },
+      };
+
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          ["Raphael", "Michaelangelo"]
+        )
+      ).toEqual(["Raphael", "Michaelangelo", "Unknown", "Unknown"]);
+    });
+    it("test an array const value populate as defaults", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        const: ["ConstFromRoot", "ConstFromRoot"],
+        items: {
+          type: "string",
+          const: "Constant",
+        },
+      };
+      expect(
+        getArrayDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          ["ConstFromRoot", "ConstFromRoot"]
+        )
+      ).toEqual(["ConstFromRoot", "ConstFromRoot", "Constant", "Constant"]);
+    });
+    it("test an array with no defaults", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        items: {
+          type: "string",
+        },
+      };
+
+      expect(
+        getArrayDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          undefined
+        )
+        // NOTE: Looks like in original code jest ignores the length and thinks
+        //       that [] === [undefined, undefined, undefined, undefined]
+      ).toEqual([undefined, undefined, undefined, undefined]);
+    });
+    it("test computeDefaults handles an invalid property schema", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          invalidProperty: "not a valid property value",
+        },
+      } as Schema;
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          undefined
+        )
+      ).toEqual({});
+    });
+    it("test with a recursive allof schema", () => {
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          RECURSIVE_REF_ALLOF,
+          {
+            ...defaults,
+            rootSchema: RECURSIVE_REF_ALLOF,
+          },
+          undefined
+        )
+      ).toEqual({
+        value: [undefined],
+      });
+    });
+    it("test computeDefaults returns undefined with simple schema and no optional args", () => {
+      const schema: Schema = { type: "string" };
+      expect(
+        getDefaultBasedOnSchemaType(
+          testValidator,
+          defaultMerger,
+          schema,
+          defaults,
+          undefined
+        )
+      ).toBe(undefined);
+    });
+  });
+  describe("getObjectDefaults()", () => {
+    it("test an object with an optional property that has a nested required property", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "string",
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          { ...defaults, rootSchema: schema, rawFormData: {} },
+          undefined
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+      });
+    });
+    it("test an object with an optional property that has a nested required property with default", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "string",
+                default: "",
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          { ...defaults, rawFormData: {}, rootSchema: schema },
+          undefined
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+        optionalProperty: { nestedRequiredProperty: "" },
+      });
+    });
+    it("test an object with an optional property that has a nested required property and includeUndefinedValues", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "object",
+                properties: {
+                  undefinedProperty: {
+                    type: "string",
+                  },
+                },
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: true,
+            rawFormData: {},
+          },
+          undefined
+        )
+      ).toEqual({
+        optionalProperty: {
+          nestedRequiredProperty: {
+            undefinedProperty: undefined,
+          },
+        },
+        requiredProperty: "foo",
+      });
+    });
+    it("test an object with an optional property that has a nested required property and includeUndefinedValues is 'excludeObjectChildren'", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          optionalNumberProperty: {
+            type: "number",
+          },
+          optionalObjectProperty: {
+            type: "object",
+            properties: {
+              nestedRequiredProperty: {
+                type: "object",
+                properties: {
+                  undefinedProperty: {
+                    type: "string",
+                  },
+                },
+              },
+            },
+            required: ["nestedRequiredProperty"],
+          },
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["requiredProperty"],
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+            rawFormData: {},
+          },
+          undefined
+        )
+      ).toEqual({
+        optionalNumberProperty: undefined,
+        optionalObjectProperty: {
+          nestedRequiredProperty: {},
+        },
+        requiredProperty: "foo",
+      });
+    });
+    it("test an object with an additionalProperties", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        additionalProperties: true,
+        required: ["requiredProperty"],
+        default: {
+          foo: "bar",
+        },
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          { ...defaults, rootSchema: schema, rawFormData: {} },
+          { foo: "bar" }
+        )
+      ).toEqual({
+        requiredProperty: "foo",
+        foo: "bar",
+      });
+    });
+    it("test an object with an additionalProperties and includeUndefinedValues", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          requiredProperty: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        additionalProperties: {
+          type: "string",
+        },
+        required: ["requiredProperty"],
+        default: {
+          foo: "bar",
+        },
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: true,
+            rawFormData: {},
+          },
+          {
+            foo: "bar",
+          }
+        )
+      ).toEqual({ requiredProperty: "foo", foo: "bar" });
+    });
+    it("test an object with additionalProperties type object with defaults and formdata", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            title: "Test",
+            type: "object",
+            properties: {
+              foo: {
+                type: "string",
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              properties: {
+                host: {
+                  title: "Host",
+                  type: "string",
+                  default: "localhost",
+                },
+                port: {
+                  title: "Port",
+                  type: "integer",
+                  default: 389,
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            rawFormData: { test: { foo: "x", newKey: {} } },
+          },
+          undefined
+        )
+      ).toEqual({
+        test: {
+          newKey: {
+            host: "localhost",
+            port: 389,
+          },
+        },
+      });
+    });
+    it("test an object with additionalProperties type object with no defaults and formdata", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            title: "Test",
+            type: "object",
+            properties: {
+              foo: {
+                type: "string",
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              properties: {
+                host: {
+                  title: "Host",
+                  type: "string",
+                },
+                port: {
+                  title: "Port",
+                  type: "integer",
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            rawFormData: { test: { foo: "x", newKey: {} } },
+          },
+          undefined
+        )
+      ).toEqual({
+        test: {
+          newKey: {},
+        },
+      });
+    });
+    it("test an object with additionalProperties type object with no defaults and non-object formdata", () => {
+      const schema: Schema = {
+        type: "object",
+        properties: {
+          test: {
+            title: "Test",
+            type: "object",
+            properties: {
+              foo: {
+                type: "string",
+              },
+            },
+            additionalProperties: {
+              type: "object",
+              properties: {
+                host: {
+                  title: "Host",
+                  type: "string",
+                },
+                port: {
+                  title: "Port",
+                  type: "integer",
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            rawFormData: {},
+          },
+          undefined
+        )
       ).toEqual({});
     });
     it("test computeDefaults handles an invalid property schema", () => {
@@ -378,33 +1651,131 @@ describe("getDefaultFormState()", () => {
         },
       } as Schema;
       expect(
-        computeDefaults(testValidator, schema, {
-          rootSchema: schema,
-          includeUndefinedValues: "excludeObjectChildren",
-        })
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+            rawFormData: {},
+          },
+          undefined
+        )
       ).toEqual({});
-    });
-    it("test with a recursive schema", () => {
-      expect(
-        computeDefaults(testValidator, RECURSIVE_REF, {
-          rootSchema: RECURSIVE_REF,
-        })
-      ).toEqual({
-        name: "",
-      });
     });
     it("test with a recursive allof schema", () => {
       expect(
-        computeDefaults(testValidator, RECURSIVE_REF_ALLOF, {
-          rootSchema: RECURSIVE_REF_ALLOF,
-        })
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          RECURSIVE_REF_ALLOF,
+          {
+            ...defaults,
+            rootSchema: RECURSIVE_REF_ALLOF,
+            rawFormData: {},
+          },
+          undefined
+        )
       ).toEqual({
         value: [undefined],
       });
     });
     it("test computeDefaults returns undefined with simple schema and no optional args", () => {
-      const schema: Schema = { type: "string" };
-      expect(computeDefaults(testValidator, schema)).toBe(undefined);
+      const schema: Schema = { type: "object" };
+      expect(
+        getObjectDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          { ...defaults, rawFormData: {} },
+          undefined
+        )
+      ).toStrictEqual({});
+    });
+  });
+  describe("getArrayDefaults()", () => {
+    it("test an array with defaults", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        default: ["Raphael", "Michaelangelo"],
+        items: {
+          type: "string",
+          default: "Unknown",
+        },
+      };
+
+      expect(
+        getArrayDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          ["Raphael", "Michaelangelo"]
+        )
+      ).toEqual(["Raphael", "Michaelangelo", "Unknown", "Unknown"]);
+    });
+    it("test an array with no defaults", () => {
+      const schema: Schema = {
+        type: "array",
+        minItems: 4,
+        items: {
+          type: "string",
+        },
+      };
+
+      expect(
+        getArrayDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          undefined
+        )
+        // NOTE: Looks like in original code jest ignores the length and thinks
+        //       that [] === [undefined, undefined, undefined, undefined]
+      ).toEqual([undefined, undefined, undefined, undefined]);
+    });
+    it("test computeDefaults handles an invalid array schema", () => {
+      const schema: Schema = {
+        type: "array",
+        items: "not a valid item value",
+      } as Schema;
+      expect(
+        getArrayDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          {
+            ...defaults,
+            rootSchema: schema,
+            includeUndefinedValues: "excludeObjectChildren",
+          },
+          undefined
+        )
+      ).toEqual([]);
+    });
+    it("test computeDefaults returns undefined with simple schema and no optional args", () => {
+      const schema: Schema = { type: "array" };
+      expect(
+        getArrayDefaults(
+          testValidator,
+          defaultMerger,
+          schema,
+          defaults,
+          undefined
+        )
+      ).toStrictEqual([]);
     });
   });
   describe("default form state behavior: ignore min items unless required", () => {
@@ -419,7 +1790,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "requiredOnly" },
@@ -438,7 +1810,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: { optionalArray: [] },
           experimental_defaultFormStateBehavior: {
@@ -460,7 +1833,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredArray"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "requiredOnly" },
@@ -482,7 +1856,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredArray"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "requiredOnly" },
@@ -504,7 +1879,8 @@ describe("getDefaultFormState()", () => {
       };
       // merging defaults with formData does not happen in computeDefaults, regardless of parameters
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: { requiredArray: ["raw0"] },
           experimental_defaultFormStateBehavior: {
@@ -554,7 +1930,8 @@ describe("getDefaultFormState()", () => {
       };
 
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: { allOf: "populateDefaults" },
         })
@@ -602,7 +1979,8 @@ describe("getDefaultFormState()", () => {
       };
 
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: { allOf: "skipDefaults" },
         })
@@ -624,7 +2002,8 @@ describe("getDefaultFormState()", () => {
       };
 
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -644,7 +2023,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -667,7 +2047,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredArray"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -689,7 +2070,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -711,7 +2093,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: { nonRequiredArray: ["raw1"] },
           experimental_defaultFormStateBehavior: {
@@ -733,7 +2116,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: { nonRequiredArray: ["not add"] },
           experimental_defaultFormStateBehavior: {
@@ -755,7 +2139,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredArray"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -774,7 +2159,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -801,7 +2187,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             arrayMinItems: { populate: "never" },
@@ -831,7 +2218,8 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           rawFormData: {
             nonRequiredArray: [
@@ -878,7 +2266,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "populateRequiredDefaults",
@@ -912,7 +2301,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty", "nestedRequiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "populateRequiredDefaults",
@@ -948,7 +2338,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty", "nestedOptionalProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "populateRequiredDefaults",
@@ -978,7 +2369,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "populateRequiredDefaults",
@@ -1012,7 +2404,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: true,
           experimental_defaultFormStateBehavior: {
@@ -1057,7 +2450,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: "excludeObjectChildren",
           experimental_defaultFormStateBehavior: {
@@ -1093,7 +2487,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "skipDefaults",
@@ -1123,7 +2518,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "skipDefaults",
@@ -1157,7 +2553,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: true,
           experimental_defaultFormStateBehavior: {
@@ -1202,7 +2599,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: "excludeObjectChildren",
           experimental_defaultFormStateBehavior: {
@@ -1238,7 +2636,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "skipEmptyDefaults",
@@ -1272,7 +2671,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty", "nestedRequiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "skipEmptyDefaults",
@@ -1308,7 +2708,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty", "nestedOptionalProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "skipEmptyDefaults",
@@ -1343,7 +2744,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           experimental_defaultFormStateBehavior: {
             emptyObjectFields: "skipEmptyDefaults",
@@ -1382,7 +2784,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: true,
           experimental_defaultFormStateBehavior: {
@@ -1427,7 +2830,8 @@ describe("getDefaultFormState()", () => {
         required: ["requiredProperty"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: "excludeObjectChildren",
           experimental_defaultFormStateBehavior: {
@@ -1476,7 +2880,8 @@ describe("getDefaultFormState()", () => {
         required: ["arrayRequired"],
       };
       expect(
-        computeDefaults(testValidator, schema, {
+        computeDefaults3(testValidator, defaultMerger, schema, {
+          ...defaults,
           rootSchema: schema,
           includeUndefinedValues: "excludeObjectChildren",
           experimental_defaultFormStateBehavior: {
@@ -1490,7 +2895,7 @@ describe("getDefaultFormState()", () => {
   describe("root default", () => {
     it("should map root schema default to form state, if any", () => {
       expect(
-        getDefaultFormState(testValidator, {
+        getDefaultFormState2(testValidator, defaultMerger, {
           type: "string",
           default: "foo",
         })
@@ -1498,8 +2903,9 @@ describe("getDefaultFormState()", () => {
     });
     it("should keep existing form data that is equal to 0", () => {
       expect(
-        getDefaultFormState(
+        getDefaultFormState2(
           testValidator,
+          defaultMerger,
           {
             type: "number",
             default: 1,
@@ -1510,8 +2916,9 @@ describe("getDefaultFormState()", () => {
     });
     it("should keep existing form data that is equal to false", () => {
       expect(
-        getDefaultFormState(
+        getDefaultFormState2(
           testValidator,
+          defaultMerger,
           {
             type: "boolean",
           },
@@ -1524,8 +2931,9 @@ describe("getDefaultFormState()", () => {
       "should overwrite existing form data that is equal to a %s",
       (noneValue) => {
         expect(
-          getDefaultFormState(
+          getDefaultFormState2(
             testValidator,
+            defaultMerger,
             {
               type: "number",
               default: 1,
@@ -1539,7 +2947,7 @@ describe("getDefaultFormState()", () => {
   describe("nested default", () => {
     it("should map schema object prop default to form state", () => {
       expect(
-        getDefaultFormState(testValidator, {
+        getDefaultFormState2(testValidator, defaultMerger, {
           type: "object",
           properties: {
             string: {
@@ -1552,14 +2960,14 @@ describe("getDefaultFormState()", () => {
     });
     it("should default to empty object if no properties are defined", () => {
       expect(
-        getDefaultFormState(testValidator, {
+        getDefaultFormState2(testValidator, defaultMerger, {
           type: "object",
         })
       ).toEqual({});
     });
     it("should recursively map schema object default to form state", () => {
       expect(
-        getDefaultFormState(testValidator, {
+        getDefaultFormState2(testValidator, defaultMerger, {
           type: "object",
           properties: {
             object: {
@@ -1577,7 +2985,7 @@ describe("getDefaultFormState()", () => {
     });
     it("should map schema array default to form state", () => {
       expect(
-        getDefaultFormState(testValidator, {
+        getDefaultFormState2(testValidator, defaultMerger, {
           type: "object",
           properties: {
             array: {
@@ -1593,7 +3001,7 @@ describe("getDefaultFormState()", () => {
     });
     it("should recursively map schema array default to form state", () => {
       expect(
-        getDefaultFormState(testValidator, {
+        getDefaultFormState2(testValidator, defaultMerger, {
           type: "object",
           properties: {
             object: {
@@ -1634,7 +3042,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         object: { array: ["foo", "bar"], bool: true },
       });
     });
@@ -1672,7 +3082,7 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, {
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
           level1: { level2: { leaf4: 4 } },
         })
       ).toEqual({
@@ -1711,7 +3121,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, formData)).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, formData)
+      ).toEqual({
         level1: { level2: { leaf1: "a" } },
       });
     });
@@ -1726,7 +3138,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: [1, 2, 3],
       });
     });
@@ -1741,7 +3155,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: [1, 2, 3],
       });
     });
@@ -1763,7 +3179,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         array: ["foo", undefined],
       });
     });
@@ -1794,7 +3212,9 @@ describe("getDefaultFormState()", () => {
         },
       };
 
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: { level2: ["child-default-1", "root-default-2"] },
       });
     });
@@ -1827,7 +3247,9 @@ describe("getDefaultFormState()", () => {
         },
       };
 
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: { level2: [{ item: "parent-default-1" }, {}] },
       });
     });
@@ -1849,7 +3271,9 @@ describe("getDefaultFormState()", () => {
         },
       };
 
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: ["child-default-1", "property-default-2"],
       });
     });
@@ -1888,7 +3312,9 @@ describe("getDefaultFormState()", () => {
         },
       };
 
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: [
           { item: "property-default-1" },
           { item: "additional-default" },
@@ -1956,7 +3382,9 @@ describe("getDefaultFormState()", () => {
         },
       };
 
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         level1: [
           { item: "property-default-1" },
           { item: "child-default-2" },
@@ -1984,7 +3412,13 @@ describe("getDefaultFormState()", () => {
       };
 
       expect(
-        getDefaultFormState(testValidator, schema, undefined, schema)
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          undefined,
+          schema
+        )
       ).toEqual({
         foo: 42,
       });
@@ -2027,8 +3461,9 @@ describe("getDefaultFormState()", () => {
         ],
       };
       expect(
-        getDefaultFormState(
+        getDefaultFormState2(
           testValidator,
+          defaultMerger,
           schema,
           { fooProp: "fooProp" },
           schema
@@ -2038,8 +3473,9 @@ describe("getDefaultFormState()", () => {
         fooProp2: "fooProp2",
       });
       expect(
-        getDefaultFormState(
+        getDefaultFormState2(
           testValidator,
+          defaultMerger,
           schema,
           { barProp: "barProp" },
           schema
@@ -2064,7 +3500,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         array: ["foo"],
       });
     });
@@ -2084,7 +3522,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { array: ["bar"] })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          array: ["bar"],
+        })
       ).toEqual({
         array: ["bar"],
       });
@@ -2103,9 +3543,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, [{}])).toEqual([
-        { item: "foo" },
-      ]);
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, [{}])
+      ).toEqual([{ item: "foo" }]);
     });
     it("defaults passed along for multiselect arrays when minItems is present", () => {
       const schema: Schema = {
@@ -2123,7 +3563,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         array: ["foo", "qux"],
       });
     });
@@ -2142,7 +3584,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         array: [],
       });
     });
@@ -2161,7 +3605,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         turtles: ["Raphael", "Michaelangelo", "Unknown", "Unknown"],
       });
     });
@@ -2177,7 +3623,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({});
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({});
     });
     it("should populate defaults for oneOf", () => {
       const schema: Schema = {
@@ -2192,7 +3640,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         name: "a",
       });
     });
@@ -2208,7 +3658,9 @@ describe("getDefaultFormState()", () => {
           },
         ],
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         name: "a",
       });
     });
@@ -2230,7 +3682,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         name: {
           first: "First Name",
         },
@@ -2256,9 +3710,17 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, {}, undefined, undefined, {
-          emptyObjectFields: "populateRequiredDefaults",
-        })
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          {},
+          undefined,
+          undefined,
+          {
+            emptyObjectFields: "populateRequiredDefaults",
+          }
+        )
       ).toEqual({ name: {} });
     });
     it("should populate nested default values for oneOf, when required is merged in", () => {
@@ -2287,9 +3749,17 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, {}, undefined, undefined, {
-          emptyObjectFields: "populateRequiredDefaults",
-        })
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          {},
+          undefined,
+          undefined,
+          {
+            emptyObjectFields: "populateRequiredDefaults",
+          }
+        )
       ).toEqual({
         name: {
           first: "First Name",
@@ -2321,9 +3791,17 @@ describe("getDefaultFormState()", () => {
         ],
       };
       expect(
-        getDefaultFormState(testValidator, schema, {}, undefined, undefined, {
-          emptyObjectFields: "populateRequiredDefaults",
-        })
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          {},
+          undefined,
+          undefined,
+          {
+            emptyObjectFields: "populateRequiredDefaults",
+          }
+        )
       ).toEqual({ foo: "fooVal", baz: "bazIsRequired" });
     });
     it("should populate defaults for oneOf + dependencies", () => {
@@ -2356,7 +3834,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { name: "Name" })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          name: "Name",
+        })
       ).toEqual({
         name: "Name",
         grade: "A",
@@ -2379,7 +3859,9 @@ describe("getDefaultFormState()", () => {
         isValid: [false, false, false, true],
       });
       expect(
-        getDefaultFormState(testValidator, schema, { test: { b: "b" } })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          test: { b: "b" },
+        })
       ).toEqual({
         test: { b: "b" },
       });
@@ -2396,7 +3878,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({});
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({});
     });
     it("should populate defaults for anyOf", () => {
       const schema: Schema = {
@@ -2411,7 +3895,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         name: "a",
       });
     });
@@ -2433,7 +3919,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, {})).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, {})
+      ).toEqual({
         name: {
           first: "First Name",
         },
@@ -2459,9 +3947,17 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, {}, undefined, undefined, {
-          emptyObjectFields: "populateRequiredDefaults",
-        })
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          {},
+          undefined,
+          undefined,
+          {
+            emptyObjectFields: "populateRequiredDefaults",
+          }
+        )
       ).toEqual({ name: {} });
     });
     it("should populate nested default values for anyOf, when required is merged in", () => {
@@ -2490,9 +3986,17 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, {}, undefined, undefined, {
-          emptyObjectFields: "populateRequiredDefaults",
-        })
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          {},
+          undefined,
+          undefined,
+          {
+            emptyObjectFields: "populateRequiredDefaults",
+          }
+        )
       ).toEqual({
         name: {
           first: "First Name",
@@ -2524,9 +4028,17 @@ describe("getDefaultFormState()", () => {
         ],
       };
       expect(
-        getDefaultFormState(testValidator, schema, {}, undefined, undefined, {
-          emptyObjectFields: "populateRequiredDefaults",
-        })
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          {},
+          undefined,
+          undefined,
+          {
+            emptyObjectFields: "populateRequiredDefaults",
+          }
+        )
       ).toEqual({ foo: "fooVal", baz: "bazIsRequired" });
     });
     it("should populate defaults for anyOf + dependencies", () => {
@@ -2560,7 +4072,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { name: "Name" })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          name: "Name",
+        })
       ).toEqual({
         name: "Name",
         grade: "A",
@@ -2583,7 +4097,9 @@ describe("getDefaultFormState()", () => {
         isValid: [false, false, false, true],
       });
       expect(
-        getDefaultFormState(testValidator, schema, { test: { b: "b" } })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          test: { b: "b" },
+        })
       ).toEqual({
         test: { b: "b" },
       });
@@ -2617,7 +4133,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { name: "Name" })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          name: "Name",
+        })
       ).toEqual({
         name: "Name",
         grade: "A",
@@ -2655,7 +4173,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { foo: { name: "Name" } })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          foo: { name: "Name" },
+        })
       ).toEqual({
         foo: {
           name: "Name",
@@ -2697,7 +4217,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, [{ foo: { name: "Name" } }])
+        getDefaultFormState2(testValidator, defaultMerger, schema, [
+          { foo: { name: "Name" } },
+        ])
       ).toEqual([
         {
           foo: {
@@ -2761,7 +4283,7 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, [
+        getDefaultFormState2(testValidator, defaultMerger, schema, [
           { foo: { name: "first" } },
           { foo: { name: "second" } },
           { foo: { name: "third" } },
@@ -2825,7 +4347,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { foo: { name: "Name" } })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          foo: { name: "Name" },
+        })
       ).toEqual({
         foo: {
           name: "Name",
@@ -2870,7 +4394,9 @@ describe("getDefaultFormState()", () => {
           },
         },
       };
-      expect(getDefaultFormState(testValidator, schema, undefined)).toEqual({
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, undefined)
+      ).toEqual({
         can_1: {
           phy: {
             bit_rate_cfg_mode: 0,
@@ -2916,7 +4442,9 @@ describe("getDefaultFormState()", () => {
         },
       };
       expect(
-        getDefaultFormState(testValidator, schema, { can_1: { phy: null } })
+        getDefaultFormState2(testValidator, defaultMerger, schema, {
+          can_1: { phy: null },
+        })
       ).toEqual({
         can_1: {
           phy: null,
@@ -2941,9 +4469,54 @@ describe("getDefaultFormState()", () => {
         foo: "foo",
         baz: "baz",
       };
-      expect(getDefaultFormState(testValidator, schema, formData)).toEqual(
-        result
-      );
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, formData)
+      ).toEqual(result);
+    });
+  });
+  describe("object with defaults and undefined in formData, testing mergeDefaultsIntoFormData", () => {
+    let schema: Schema;
+    let defaultedFormData: any;
+    beforeAll(() => {
+      schema = {
+        type: "object",
+        properties: {
+          field: {
+            type: "string",
+            default: "foo",
+          },
+        },
+        required: ["field"],
+      };
+      defaultedFormData = { field: "foo" };
+    });
+    it("returns field value of default when formData is empty", () => {
+      const formData = {};
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, formData)
+      ).toEqual(defaultedFormData);
+    });
+    it("returns field value of undefined when formData has undefined for field", () => {
+      const formData = { field: undefined };
+      expect(
+        getDefaultFormState2(testValidator, defaultMerger, schema, formData)
+      ).toEqual(formData);
+    });
+    it("returns field value of default when formData has undefined for field and `useDefaultIfFormDataUndefined`", () => {
+      const formData = { field: undefined };
+      expect(
+        getDefaultFormState2(
+          testValidator,
+          defaultMerger,
+          schema,
+          formData,
+          undefined,
+          undefined,
+          {
+            mergeDefaultsIntoFormData: "useDefaultIfFormDataUndefined",
+          }
+        )
+      ).toEqual(defaultedFormData);
     });
   });
   it("should return undefined defaults for a required array property with minItems", () => {
@@ -2958,7 +4531,14 @@ describe("getDefaultFormState()", () => {
       },
     };
     expect(
-      getDefaultFormState(testValidator, schema, undefined, schema, false)
+      getDefaultFormState2(
+        testValidator,
+        defaultMerger,
+        schema,
+        undefined,
+        schema,
+        false
+      )
     ).toEqual({
       requiredArray: [undefined, undefined],
     });
@@ -2975,8 +4555,9 @@ describe("getDefaultFormState()", () => {
       },
     };
     expect(
-      getDefaultFormState(
+      getDefaultFormState2(
         testValidator,
+        defaultMerger,
         schema,
         { requiredArray: ["raw0"] },
         schema,
@@ -2998,8 +4579,9 @@ describe("getDefaultFormState()", () => {
       },
     };
     expect(
-      getDefaultFormState(
+      getDefaultFormState2(
         testValidator,
+        defaultMerger,
         schema,
         { requiredArray: ["raw0"] },
         schema,
@@ -3025,9 +4607,17 @@ describe("getDefaultFormState()", () => {
       required: ["requiredArray"],
     };
     expect(
-      getDefaultFormState(testValidator, schema, undefined, schema, false, {
-        arrayMinItems: { populate: "requiredOnly" },
-      })
+      getDefaultFormState2(
+        testValidator,
+        defaultMerger,
+        schema,
+        undefined,
+        schema,
+        false,
+        {
+          arrayMinItems: { populate: "requiredOnly" },
+        }
+      )
     ).toEqual({ requiredArray: ["default0", "default0"] });
   });
   it("should not combine defaults with raw form data for a required array property with minItems", () => {
@@ -3043,8 +4633,9 @@ describe("getDefaultFormState()", () => {
       required: ["requiredArray"],
     };
     expect(
-      getDefaultFormState(
+      getDefaultFormState2(
         testValidator,
+        defaultMerger,
         schema,
         { requiredArray: ["raw0"] },
         schema,
@@ -3068,8 +4659,9 @@ describe("getDefaultFormState()", () => {
       required: ["requiredArray"],
     };
     expect(
-      getDefaultFormState(
+      getDefaultFormState2(
         testValidator,
+        defaultMerger,
         schema,
         { requiredArray: ["raw0"] },
         schema,
@@ -3098,14 +4690,22 @@ describe("getDefaultFormState()", () => {
       required: ["stringArray", "numberArray"],
     };
     expect(
-      getDefaultFormState(testValidator, schema, {}, schema, false, {
-        arrayMinItems: {
-          computeSkipPopulate: (_, schema) =>
-            !Array.isArray(schema?.items) &&
-            typeof schema?.items !== "boolean" &&
-            schema?.items?.type === "number",
-        },
-      })
+      getDefaultFormState2(
+        testValidator,
+        defaultMerger,
+        schema,
+        {},
+        schema,
+        false,
+        {
+          arrayMinItems: {
+            computeSkipPopulate: (_, schema) =>
+              !Array.isArray(schema?.items) &&
+              typeof schema?.items !== "boolean" &&
+              schema?.items?.type === "number",
+          },
+        }
+      )
     ).toEqual({ stringArray: [undefined], numberArray: [] });
   });
 });

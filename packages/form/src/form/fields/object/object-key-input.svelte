@@ -4,13 +4,16 @@
 
   import type { Config } from "../../config.js";
   import type { UiSchema } from "../../ui-schema.js";
-  import { type IdSchema, computeId } from "../../id-schema.js";
-  import { getFormContext } from "../../context.js";
-  import { getWidget } from "../../widgets.js";
-  import { getErrors, getUiOptions } from "../../utils.js";
-  import { getTemplate } from "../../templates/index.js";
-
-  import { inputAttributes } from "../make-widget-attributes.js";
+  import type { IdSchema } from "../../id-schema.js";
+  import {
+    getWidget,
+    getTemplate,
+    inputAttributes,
+    getErrors,
+    getUiOptions,
+    getFormContext,
+    makePseudoId,
+  } from "../../context/index.js";
 
   import { getObjectContext } from "./context.js";
   import { generateNewKey } from "./generate-new-object-key.js";
@@ -33,11 +36,11 @@
   const objCtx = getObjectContext();
 
   const id = $derived(
-    computeId(idSchema ?? { $id: ctx.idPrefix }, "key-input")
+    makePseudoId(ctx, idSchema?.$id ?? ctx.idPrefix, "key-input")
   );
   const uiOptions = $derived(getUiOptions(ctx, uiSchema));
   const config: Config = $derived({
-    name: `${name}__key`,
+    name: id,
     title: `${name} Key`,
     schema: { type: "string" },
     idSchema: { $id: id },
@@ -58,6 +61,9 @@
           return;
         }
         const newKey = generateNewKey(key.value, objCtx.newKeySeparator, obj);
+        if (!ctx.validateAdditionalPropertyKey(config, newKey)) {
+          return;
+        }
         obj[newKey] = obj[property];
         delete obj[property];
       },

@@ -11,7 +11,7 @@ export default defineConfig({
   trailingSlash: "always",
   i18n: {
     defaultLocale: "en",
-    locales: ["en", "ru"],
+    locales: ["en"],
   },
   integrations: [
     svelte(),
@@ -30,20 +30,17 @@ export default defineConfig({
           autogenerate: { directory: "themes" },
         },
         {
+          label: "Integrations",
+          autogenerate: { directory: "integrations" },
+        },
+        {
+          label: "Advanced scenarios",
+          autogenerate: { directory: "advanced" },
+        },
+        {
           label: "API Reference",
           autogenerate: { directory: "api-reference" },
         },
-        // {
-        // 	label: 'Guides',
-        // 	items: [
-        // 		// Each item here is one entry in the navigation menu.
-        // 		{ label: 'Example Guide', slug: 'guides/example' },
-        // 	],
-        // },
-        // {
-        // 	label: 'Reference',
-        // 	autogenerate: { directory: 'reference' },
-        // },
       ],
       components: {
         Head: "./src/components/custom-head.astro",

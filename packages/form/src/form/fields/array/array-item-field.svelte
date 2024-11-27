@@ -1,21 +1,24 @@
 <script lang="ts">
-  import { getFormContext } from "../../context.js";
-  import { getComponent } from '../../component.js';
-  import { getTemplate } from '../../templates/index.js';
-  import { getErrors, getUiOptions } from "../../utils.js";
+  import {
+    getComponent,
+    getTemplate,
+    getField,
+    isDisabled,
+    getErrors,
+    getUiOptions,
+    getFormContext
+  } from "../../context/index.js";
 
-  import { getField, type FieldProps } from '../model.js';
-  import { isDisabledOrReadonly } from '../../is-disabled-or-readonly.js'
+  import type { FieldProps } from '../model.js';
 
   import { getArrayContext } from './context.js';
-  import { makeHandler } from './make-click-handler.js';
 
   let {
     index,
     arr = $bindable(),
     value = $bindable(),
     config,
-    //
+    canCopy,
     canRemove,
     canMoveUp,
     canMoveDown,
@@ -28,14 +31,10 @@
   const Field = $derived(getField(ctx, "root", config));
   const Button = $derived(getComponent(ctx, "button", config));
 
-  const moveUp = $derived(arrayCtx.orderable && canMoveUp)
-  const moveDown = $derived(arrayCtx.orderable && canMoveDown)
-  const remove = $derived(arrayCtx.removable && canRemove)
-  const copy = $derived(arrayCtx.copyable && arrayCtx.canAdd)
-  const toolbar = $derived(moveUp || moveDown || remove || copy)
+  const toolbar = $derived(canCopy || canRemove || canMoveUp || canMoveDown);
   const uiOptions = $derived(getUiOptions(ctx, config.uiSchema))
-  const disabledOrReadonly = $derived(
-    isDisabledOrReadonly(ctx, uiOptions?.input)
+  const disabled = $derived(
+    isDisabled(ctx, uiOptions?.input)
   )
   const errors = $derived(getErrors(ctx, config.idSchema))
 </script>
@@ -46,49 +45,57 @@
       {errors}
       {config}
       type="array-item-move-up"
-      disabled={disabledOrReadonly || !moveUp}
-      onclick={makeHandler(() => {
-        arrayCtx.keyed.swap(index, index - 1)
-      })}
+      disabled={disabled || !canMoveUp}
+      onclick={(e) => {
+        e.preventDefault()
+        const tmp = arr[index]
+        arr[index] = arr[index - 1]
+        arr[index - 1] = tmp
+      }}
     >
-      {ctx.translation("move-array-item-up")}
+      <ctx.IconOrTranslation data={["move-array-item-up"]} />
     </Button>
     <Button
       {errors}
       {config}
       type="array-item-move-down"
-      disabled={disabledOrReadonly || !moveDown}
-      onclick={makeHandler(() => {
-        arrayCtx.keyed.swap(index, index + 1)
-      })}
+      disabled={disabled || !canMoveDown}
+      onclick={(e) => {
+        e.preventDefault()
+        const tmp = arr[index]
+        arr[index] = arr[index + 1]
+        arr[index + 1] = tmp
+      }}
     >
-      {ctx.translation("move-array-item-down")}
+      <ctx.IconOrTranslation data={["move-array-item-down"]} />
     </Button>
   {/if}
-  {#if copy}
+  {#if canCopy}
     <Button
       {errors}
       {config}
+      {disabled}
       type="array-item-copy"
-      disabled={disabledOrReadonly}
-      onclick={makeHandler(() => {
-        arrayCtx.keyed.insert(index, $state.snapshot(value))
-      })}
+      onclick={(e) => {
+        e.preventDefault()
+        arr.splice(index, 0, $state.snapshot(value))
+      }}
     >
-      {ctx.translation("copy-array-item")}
+      <ctx.IconOrTranslation data={["copy-array-item"]} />
     </Button>
   {/if}
-  {#if remove}
+  {#if canRemove}
     <Button
       {errors}
       {config}
       type="array-item-remove"
-      disabled={disabledOrReadonly}
-      onclick={makeHandler(() => {
-        arrayCtx.keyed.remove(index)
-      })}
+      {disabled}
+      onclick={(e) => {
+        e.preventDefault()
+        arr.splice(index, 1)
+      }}
     >
-      {ctx.translation("remove-array-item")}
+      <ctx.IconOrTranslation data={["remove-array-item"]} />
     </Button>
   {/if}
 {/snippet}

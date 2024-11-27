@@ -1,17 +1,31 @@
 <script lang="ts">
   import { proxy } from "@/lib/svelte.svelte";
-  import { computeId } from '../id-schema.js';
+  import { deepEqual } from '@/lib/deep-equal.js'
+  import {
+    getDiscriminatorFieldFromSchema,
+    mergeSchemas,
+    type EnumOption,
+    type SchemaValue,
+  } from '@/core/index.js';
+
   import type { Config } from '../config.js';
-  import { getDiscriminatorFieldFromSchema, mergeSchemas, type EnumOption } from '@/core/index.js';
   import type { UiSchema } from '../ui-schema.js';
+  import {
+    getTemplate,
+    getWidget,
+    getField,
+    selectAttributes,
+    getClosestMatchingOption,
+    getDefaultFieldState,
+    getErrors,
+    getUiOptions,
+    retrieveSchema,
+    sanitizeDataForNewSchema,
+    getFormContext,
+    makePseudoId
+  } from "../context/index.js";
 
-  import { getFormContext } from "../context.js";
-  import { getTemplate } from '../templates/index.js';
-  import { getWidget } from '../widgets.js';
-  import { getClosestMatchingOption, getDefaultFormState, getErrors, getUiOptions, retrieveSchema, sanitizeDataForNewSchema } from "../utils.js";
-
-  import { getField, type FieldProps } from "./model.js";
-  import { selectAttributes } from "./make-widget-attributes.js";
+  import type { FieldProps } from "./model.js";
 
   let {
     value = $bindable(),
@@ -31,20 +45,24 @@
     )
   );
 
-  const selectedOption = proxy((isRegOnly) => {
+  let lastValue: SchemaValue | undefined
+  const selectedOption = proxy((isRegOnly, currentSelected: number | undefined) => {
     if (isRegOnly) {
       config.schema;
       value;
       retrievedOptions;
       return -1;
     }
-    const discriminator = getDiscriminatorFieldFromSchema(config.schema);
+    if (currentSelected !== undefined && deepEqual(lastValue, value)) {
+      return currentSelected
+    }
+    lastValue = $state.snapshot(value)
     return getClosestMatchingOption(
       ctx,
       value,
       retrievedOptions,
       0,
-      discriminator
+      getDiscriminatorFieldFromSchema(config.schema),
     );
   }, (newSelected, oldSelected) => {
     if (oldSelected === undefined) {
@@ -56,7 +74,7 @@
       return
     }
     const oldSchema = oldSelected < 0 ? undefined : retrievedOptions[oldSelected];
-    value = getDefaultFormState(ctx, newSchema, oldSchema !== undefined ? sanitizeDataForNewSchema(ctx, newSchema, oldSchema, value) : value)
+    value = getDefaultFieldState(ctx, newSchema, oldSchema !== undefined ? sanitizeDataForNewSchema(ctx, newSchema, oldSchema, value) : value)
   });
 
   const optionSchema = $derived.by(() => {
@@ -96,6 +114,7 @@
   })
   const enumOptions = $derived<EnumOption<number>[]>(
     retrievedOptions.map((s, i) => ({
+      id: makePseudoId(ctx, config.idSchema.$id, i),
       label:
         optionsUiOptions[i]?.title ??
         s.title ??
@@ -106,12 +125,12 @@
   );
 
   const widgetConfig: Config = $derived.by(() => {
-    const suffix = `${combinationKey.toLowerCase()}`;
+    const suffix = combinationKey.toLowerCase() as Lowercase<typeof combinationKey>;
     return {
       ...config,
       schema: { type: "integer", default: 0 },
       name: `${config.name}__${suffix}`,
-      idSchema: { $id: computeId(config.idSchema, suffix) },
+      idSchema: { $id: makePseudoId(ctx, config.idSchema.$id, suffix) },
       required: true,
     };
   });

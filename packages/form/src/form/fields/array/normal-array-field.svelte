@@ -6,21 +6,22 @@
     type SchemaArrayValue,
   } from "@/core/index.js";
   
-  import { getFormContext } from "../../context.js";
-  import { getComponent } from '../../component.js';
-  import { getTemplate } from '../../templates/index.js';
   import {
-    getDefaultFormState,
+    getField,
+    getComponent,
+    getTemplate,
+    getDefaultFieldState,
     getUiOptions,
     retrieveSchema,
-  } from "../../utils.js";
+    getFormContext,
+    makeArrayItemId,
+    makeIdSchema,
+  } from "../../context/index.js";
   
-  import { getField, type FieldProps } from '../model.js';
+  import type { FieldProps } from '../model.js';
 
   import { getArrayContext } from './context.js';
-  import { makeHandler } from './make-click-handler.js';
   import { getArrayItemName, getNormalArrayItemTitle } from './get-array-item-name.js'
-  import { getArrayItemSchemaId } from './get-array-item-schema-id.js'
 
   let { value = $bindable(), config }: FieldProps<"normalArray"> = $props()
 
@@ -48,12 +49,13 @@
     config={config}
     attributes={config.uiOptions?.button}
     type="array-item-add"
-    disabled={arrayCtx.disabledOrReadonly}
-    onclick={makeHandler(() => {
-      arrayCtx.keyed.push(getDefaultFormState(ctx, schemaItems, undefined))
-    })}
+    disabled={arrayCtx.disabled}
+    onclick={(e) => {
+      e.preventDefault();
+      value?.push(getDefaultFieldState(ctx, schemaItems, undefined))
+    }}
   >
-    {ctx.translation("add-array-item")}
+    <ctx.IconOrTranslation data={["add-array-item"]} />
   </Button>
 {/snippet}
 <Template
@@ -65,11 +67,10 @@
   {#if value}
     {#each value as item, index (arrayCtx.keyed.key(index))}
       {@const itemSchema = retrieveSchema(ctx, schemaItems, item)}
-      {@const itemIdSchema = getArrayItemSchemaId(
+      {@const itemIdSchema = makeIdSchema(
         ctx,
-        config.idSchema,
         itemSchema,
-        index,
+        makeArrayItemId(ctx, config.idSchema.$id, index),
         item
       )}
       <ArrayItem
@@ -85,9 +86,10 @@
         }}
         bind:arr={value}
         bind:value={value[index]}
-        canRemove={true}
-        canMoveUp={index > 0}
-        canMoveDown={index < value.length - 1}
+        canCopy={arrayCtx.copyable && arrayCtx.canAdd}
+        canRemove={arrayCtx.removable}
+        canMoveUp={arrayCtx.orderable && index > 0}
+        canMoveDown={arrayCtx.orderable && index < value.length - 1}
       />
     {/each}
   {/if}

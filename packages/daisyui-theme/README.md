@@ -2,7 +2,7 @@
 
 The [daisyui](https://github.com/saadeghi/daisyui) based theme for [svelte-jsonschema-form](https://github.com/x0k/svelte-jsonschema-form).
 
-- [Documentation](https://x0k.github.io/svelte-jsonschema-form/)
+- [Documentation](https://x0k.github.io/svelte-jsonschema-form/themes/daisyui/)
 - [Playground](https://x0k.github.io/svelte-jsonschema-form/playground/)
 
 ## Installation
@@ -45,18 +45,20 @@ export default {
 
 ```typescript
 // Inject them as you like
-import daisyStyles from "@sjsf/daisyui-theme/styles.css?inline";
+import themeStyles from "@sjsf/daisyui-theme/styles.css?inline";
 ```
 
 ### Apply theme
 
 ```svelte
 <script lang="ts">
-  import { Form } from '@sjsf/form';
+  import { useForm2 } from '@sjsf/form';
   import { theme } from '@sjsf/daisyui-theme';
-</script>
 
-<Form {...theme} />
+  const form = useForm2({
+    ...theme
+  })
+</script>
 ```
 
 ## License

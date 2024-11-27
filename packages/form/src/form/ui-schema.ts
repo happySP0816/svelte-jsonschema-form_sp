@@ -13,7 +13,6 @@ import type { Field, FieldType } from "./fields/index.js";
 import type { Template, TemplateType } from "./templates/index.js";
 import type { Widget, WidgetType } from "./widgets.js";
 
-
 export type UiSchemaRoot = UiSchemaRootIndex & UiSchemaRootContent;
 
 interface UiSchemaRootIndex {
@@ -48,15 +47,13 @@ interface UiSchemaContent {
   additionalItems?: UiSchema;
 }
 
-// TODO: Omit non serializable properties
-export type InputAttributes = (
-  | HTMLInputAttributes
-  | HTMLTextareaAttributes
-  | HTMLSelectAttributes
-) & {
-  // To reduce amount of type casting
-  readonly?: boolean;
-};
+export interface Inputs {
+  input: HTMLInputAttributes;
+  textarea: HTMLTextareaAttributes;
+  select: HTMLSelectAttributes;
+}
+
+export type InputAttributes = Inputs[keyof Inputs];
 
 export interface UiOptions {
   /**

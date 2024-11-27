@@ -1,16 +1,21 @@
 <script lang="ts">
   import { SvelteMap } from 'svelte/reactivity';
   import Ajv from "ajv";
-  import { Form, ON_BLUR, ON_CHANGE, ON_INPUT, AFTER_CHANGED, AFTER_SUBMITTED, AFTER_TOUCHED, type Errors } from "@sjsf/form";
+  import { ON_BLUR, ON_CHANGE, ON_INPUT, AFTER_CHANGED, AFTER_SUBMITTED, AFTER_TOUCHED, useForm2, SimpleForm } from "@sjsf/form";
   import { translation } from "@sjsf/form/translations/en";
   import { AjvValidator, addFormComponents, DEFAULT_AJV_CONFIG } from "@sjsf/ajv8-validator";
   import { focusOnFirstError } from '@sjsf/form/focus-on-first-error';
+  import { setThemeContext } from '@sjsf/shadcn-theme'
+  import { components } from '@sjsf/shadcn-theme/default'
 
   import { themes, themeStyles } from './themes'
+  import { icons, iconsStyles } from './icons'
   import { ShadowHost } from "./shadow";
   import Github from "./github.svelte";
   import OpenBook from "./open-book.svelte";
   import ThemePicker from "./theme-picker.svelte";
+  import Editor from './editor.svelte';
+  import Debug from './debug.svelte';
 
   import { samples } from "./samples";
 
@@ -20,6 +25,10 @@
 
   function isThemeName(name: unknown): name is keyof typeof themes {
     return typeof name === "string" && name in themes;
+  }
+
+  function isIconSetName(name: unknown): name is keyof typeof icons {
+    return typeof name === "string" && name in icons;
   }
 
   const url = new URL(window.location.toString());
@@ -36,7 +45,6 @@
   let sampleName = $state(initialSampleName);
   let schema = $state(samples[initialSampleName].schema);
   let uiSchema = $state(samples[initialSampleName].uiSchema);
-  let value = $state(samples[initialSampleName].formData);
 
   const parsedThemeName = url.searchParams.get("theme");
   function selectTheme(name: keyof typeof themes, replace = false) {
@@ -51,6 +59,19 @@
   const theme = $derived(themes[themeName]);
   const themeStyle = $derived(themeStyles[themeName]);
 
+  const parsedIconSetName = url.searchParams.get("icons");
+  function selectIconSet(name: keyof typeof icons, replace = false) {
+    url.searchParams.set("icons", name);
+    history[replace ? "replaceState" : "pushState"](null, "", url);
+    return name;
+  }
+  const initialIconSetName = isIconSetName(parsedIconSetName)
+    ? parsedIconSetName
+    : selectIconSet("none", true);
+  let iconSetName = $state(initialIconSetName);
+  const iconSet = $derived(icons[iconSetName]);
+  const iconSetStyle = $derived(iconsStyles[iconSetName]);
+
   const validator = $derived(
     new (samples[sampleName].Validator ?? AjvValidator)(
       addFormComponents(new Ajv(DEFAULT_AJV_CONFIG)),
@@ -59,13 +80,47 @@
   );
 
   let disabled = $state(false);
-  let readonly = $state(false);
   let html5Validation = $state(false);
-  let errorsList = $state(true);
   let doFocusOnFirstError = $state(true);
-  let errors: Errors = $state.raw(
-    samples[initialSampleName].errors ?? new SvelteMap()
-  );
+
+  const form = useForm2({
+    initialValue: samples[initialSampleName].formData,
+    initialErrors: samples[initialSampleName].errors ?? new SvelteMap(),
+    translation,
+    get schema() {
+      return schema;
+    },
+    get uiSchema() {
+      return uiSchema;
+    },
+    get components() {
+      return theme.components;
+    },
+    get widgets() {
+      return theme.widgets;
+    },
+    get validator() {
+      return validator;
+    },
+    get disabled() {
+      return disabled;
+    },
+    get inputsValidationMode() {
+      return validationEvent | validationAfter
+    },
+    get icons() {
+      return iconSet;
+    },
+    onSubmit (value) {
+      console.log("submit", value);
+    },
+    onSubmitError (errors, e) {
+      if (doFocusOnFirstError) {
+        focusOnFirstError(errors, e);
+      }
+      console.log("errors", errors);
+    },
+  })
 
   let playgroundTheme = $state<"system" | "light" | "dark">(
     localStorage.theme ?? "system"
@@ -85,6 +140,8 @@
   const urlValidationAfter = Number(url.searchParams.get("vafter") ?? 0)
   const initialValidationAfter = [0, AFTER_SUBMITTED, AFTER_TOUCHED, AFTER_CHANGED].find((v) => v === urlValidationAfter) ?? 0
   let validationAfter = $state(setValidation("vafter", initialValidationAfter, true));
+
+  setThemeContext({ components });
 </script>
 
 <div
@@ -97,16 +154,8 @@
       Disabled
     </label>
     <label>
-      <input type="checkbox" bind:checked={readonly} />
-      Readonly
-    </label>
-    <label>
       <input type="checkbox" bind:checked={html5Validation} />
       HTML5 validation
-    </label>
-    <label>
-      <input type="checkbox" bind:checked={errorsList} />
-      Errors list
     </label>
     <label>
       <input type="checkbox" bind:checked={doFocusOnFirstError} />
@@ -130,6 +179,11 @@
     </select>
     <select bind:value={themeName} onchange={() => selectTheme(themeName)}>
       {#each Object.keys(themes) as name (name)}
+        <option value={name}>{name}</option>
+      {/each}
+    </select>
+    <select bind:value={iconSetName} onchange={() => selectIconSet(iconSetName)}>
+      {#each Object.keys(icons) as name (name)}
         <option value={name}>{name}</option>
       {/each}
     </select>
@@ -157,8 +211,8 @@
           sampleName = selectSample(name as keyof typeof samples);
           schema = samples[sampleName].schema;
           uiSchema = samples[sampleName].uiSchema;
-          value = samples[sampleName].formData;
-          errors = samples[sampleName].errors ?? new SvelteMap();
+          form.value = samples[sampleName].formData;
+          form.errors = samples[sampleName].errors ?? new SvelteMap();
         }}
       >
         {name}
@@ -167,62 +221,22 @@
   </div>
   <div class="flex gap-8">
     <div class="flex-[4] flex flex-col gap-2">
-      <div class="h-[400px] border rounded overflow-auto p-2">
-        <pre class="w-0"><code>{JSON.stringify(schema, null, 2)}</code></pre>
-      </div>
+      <Editor class="font-mono h-[400px] border rounded p-2 data-[error=true]:border-red-500 data-[error=true]:outline-none bg-transparent" bind:value={schema} />
       <div class="flex gap-2">
-        <div class="h-[400px] flex-1 border rounded overflow-auto p-2">
-          <pre class="w-0"><code
-              >{JSON.stringify(
-                uiSchema,
-                (_, v) =>
-                  typeof v === "function" ? `Component(${v.componentName})` : v,
-                2
-              )}</code
-            ></pre>
-        </div>
-        <div class="h-[400px] flex-1 border rounded overflow-auto p-2">
-          <pre class="w-0"><code>{JSON.stringify(value, null, 2)}</code></pre>
-        </div>
+        <Editor class="font-mono h-[400px] grow border rounded p-2 data-[error=true]:border-red-500 data-[error=true]:outline-none bg-transparent" bind:value={uiSchema} />
+        <Editor class="font-mono h-[400px] grow border rounded p-2 data-[error=true]:border-red-500 data-[error=true]:outline-none bg-transparent" bind:value={form.value} />
       </div>
     </div>
-    <ShadowHost class="flex-[3] max-h-[808px] overflow-y-auto" style={themeStyle}>
-      <Form
-        data-theme={lightOrDark}
+    <ShadowHost class="flex-[3] max-h-[808px] overflow-y-auto" style={`${themeStyle}\n${iconSetStyle}`}>
+      <SimpleForm
+        {form}
+        data-theme={themeName === "skeleton" ? "cerberus" : lightOrDark}
         class={lightOrDark}
-        style="background-color: transparent; display: flex; flex-direction: column; gap: 1rem"
-        bind:value
-        {...theme}
-        {schema}
-        {uiSchema}
-        {validator}
-        {translation}
-        {readonly}
-        {disabled}
+        style="background-color: transparent; display: flex; flex-direction: column; gap: 1rem; padding: 0.3rem;"
         novalidate={!html5Validation || undefined}
-        inputsValidationMode={validationEvent | validationAfter}
-        bind:errors
-        onSubmit={(value) => {
-          console.log("submit", value);
-        }}
-        onSubmitError={(errors, e) => {
-          if (doFocusOnFirstError) {
-            focusOnFirstError(errors, e);
-          }
-          console.log("errors", errors);
-        }}
       />
-      {#if errorsList && errors.size > 0}
-        <div style="color: red; padding-bottom: 1rem;">
-          <span style="font-size: larger; font-weight: bold;">Errors</span>
-          <ui>
-            {#each errors as [field, fieldErrors] (field)}
-              {#each fieldErrors as err}
-                <li>{err.message}</li>
-              {/each}
-            {/each}
-          </ui>
-        </div>
+      {#if location.hostname === "localhost"}
+        <Debug />
       {/if}
     </ShadowHost>
   </div>

@@ -1,6 +1,6 @@
 {
   "name": "@sjsf/form",
-  "version": "0.1.0",
+  "version": "1.6.1",
   "description": "Svelte 5 library for creating forms based on JSON schema.",
   "license": "(MIT AND Apache-2.0)",
   "keywords": [
@@ -31,56 +31,76 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "es-toolkit": "^1.27.0",
     "fast-equals": "^5.0.1",
     "json-schema-merge-allof": "^0.8.1",
     "jsonpointer": "^5.0.1"
   },
   "peerDependencies": {
-    "svelte": "5.0.0-next.264"
+    "svelte": "^5.0.0"
   },
   "devDependencies": {
-    "@sveltejs/package": "^2.3.5",
+    "@sveltejs/package": "catalog:",
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "@tsconfig/svelte": "catalog:",
     "@types/json-schema": "^7.0.15",
     "@types/json-schema-merge-allof": "^0.6.5",
-    "@types/node": "^22.7.5",
     "deep-freeze-es6": "^3.0.2",
-    "json-schema": "^0.4.0",
+    "svelte": "catalog:",
     "svelte-check": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
   },
+  "types": "./dist/form/index.d.ts",
+  "svelte": "./dist/form/index.js",
   "exports": {
     "./lib/*": {
       "types": "./dist/lib/*.d.ts",
-      "svelte": "./dist/lib/*.js",
       "default": "./dist/lib/*.js"
+    },
+    "./lib/svelte.svelte": {
+      "types": "./dist/lib/svelte.svelte.d.ts",
+      "svelte": "./dist/lib/svelte.svelte.js"
     },
     "./core": {
       "types": "./dist/core/index.d.ts",
-      "svelte": "./dist/core/index.js",
       "default": "./dist/core/index.js"
     },
     ".": {
       "types": "./dist/form/index.d.ts",
-      "svelte": "./dist/form/index.js",
-      "default": "./dist/form/index.js"
+      "svelte": "./dist/form/index.js"
     },
     "./translations/*": {
       "types": "./dist/translations/*.d.ts",
-      "svelte": "./dist/translations/*.js",
-      "default": "./dist/translations/*.js"
+      "svelte": "./dist/translations/*.js"
     },
     "./basic-theme": {
       "types": "./dist/basic-theme/index.d.ts",
-      "svelte": "./dist/basic-theme/index.js",
-      "default": "./dist/basic-theme/index.js"
+      "svelte": "./dist/basic-theme/index.js"
     },
     "./focus-on-first-error": {
       "types": "./dist/focus-on-first-error.d.ts",
-      "svelte": "./dist/focus-on-first-error.js",
-      "default": "./dist/focus-on-first-error.js"
+      "svelte": "./dist/focus-on-first-error.js"
+    },
+    "./legacy-omit-extra-data": {
+      "types": "./dist/legacy-omit-extra-data.d.ts",
+      "default": "./dist/legacy-omit-extra-data.js"
+    },
+    "./get-default-form-state": {
+      "types": "./dist/get-default-form-state.d.ts",
+      "default": "./dist/get-default-form-state.js"
+    },
+    "./use-mutation.svelte": {
+      "types": "./dist/use-mutation.svelte.d.ts",
+      "svelte": "./dist/use-mutation.svelte.js"
+    },
+    "./prevent-data-loss.svelte": {
+      "types": "./dist/prevent-data-loss.svelte.d.ts",
+      "svelte": "./dist/prevent-data-loss.svelte.js"
+    },
+    "./static-analysis": {
+      "types": "./dist/static-analysis.d.ts",
+      "default": "./dist/static-analysis.js"
     }
   }
 }

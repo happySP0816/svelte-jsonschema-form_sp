@@ -6,7 +6,8 @@ import {
   getDiscriminatorFieldFromSchema,
   getOptionMatchingSimpleDiscriminator,
 } from "./discriminator.js";
-import { resolveAllReferences, retrieveSchema } from "./resolve.js";
+import { defaultMerger, type Merger2 } from "./merger.js";
+import { resolveAllReferences, retrieveSchema2 } from "./resolve.js";
 import {
   isSchema,
   PROPERTIES_KEY,
@@ -120,41 +121,58 @@ export function getFirstMatchingOption(
   return 0;
 }
 
-function calculateIndexScore(
+/**
+ * @deprecated use `calculateIndexScore2`
+ */
+export function calculateIndexScore(
   validator: Validator,
   rootSchema: Schema,
   schema?: Schema,
-  formData: SchemaValue = {}
+  formData?: SchemaValue,
+  merger = defaultMerger
+): number {
+  return calculateIndexScore2(validator, merger, rootSchema, schema, formData);
+}
+
+export function calculateIndexScore2(
+  validator: Validator,
+  merger: Merger2,
+  rootSchema: Schema,
+  schema?: Schema,
+  formData?: SchemaValue
 ): number {
   let totalScore = 0;
   if (schema) {
     const schemaProperties = schema.properties;
     if (schemaProperties && isSchemaObjectValue(formData)) {
-      for (const [key, value] of Object.entries(schemaProperties)) {
+      for (const [key, propertySchema] of Object.entries(schemaProperties)) {
         const formValue = formData[key];
-        if (typeof value === "boolean") {
+        if (typeof propertySchema === "boolean") {
           continue;
         }
-        if (schema[REF_KEY] !== undefined) {
-          const newSchema = retrieveSchema(
+        if (propertySchema[REF_KEY] !== undefined) {
+          const newSchema = retrieveSchema2(
             validator,
-            value,
+            merger,
+            propertySchema,
             rootSchema,
             formValue
           );
-          totalScore += calculateIndexScore(
+          totalScore += calculateIndexScore2(
             validator,
+            merger,
             rootSchema,
             newSchema,
             formValue
           );
           continue;
         }
-        const altSchemas = value.oneOf || value.anyOf;
+        const altSchemas = propertySchema.oneOf || propertySchema.anyOf;
         if (altSchemas && formValue) {
-          const discriminator = getDiscriminatorFieldFromSchema(value);
-          totalScore += getClosestMatchingOption(
+          const discriminator = getDiscriminatorFieldFromSchema(propertySchema);
+          totalScore += getClosestMatchingOption2(
             validator,
+            merger,
             rootSchema,
             formValue,
             altSchemas.filter(isSchema),
@@ -163,33 +181,40 @@ function calculateIndexScore(
           );
           continue;
         }
-        if (value.type === "object") {
-          totalScore += calculateIndexScore(
+        if (propertySchema.type === "object") {
+          if (isSchemaObjectValue(formValue)) {
+            totalScore += 1;
+          }
+          totalScore += calculateIndexScore2(
             validator,
+            merger,
             rootSchema,
-            value,
+            propertySchema,
             formValue
           );
           continue;
         }
-        if (formValue !== undefined && value.type === typeOfValue(formValue)) {
+        if (
+          formValue !== undefined &&
+          propertySchema.type === typeOfValue(formValue)
+        ) {
           // If the types match, then we bump the score by one
-          let newScore = 1;
-          if (value.default !== undefined) {
+          totalScore += 1;
+          if (propertySchema.default !== undefined) {
             // If the schema contains a readonly default value score the value that matches the default higher and
             // any non-matching value lower
-            newScore += formValue === value.default ? 1 : -1;
-          } else if (value.const !== undefined) {
+            totalScore += formValue === propertySchema.default ? 1 : -1;
+          } else if (propertySchema.const !== undefined) {
             // If the schema contains a const value score the value that matches the default higher and
             // any non-matching value lower
-            newScore += formValue === value.const ? 1 : -1;
+            totalScore += formValue === propertySchema.const ? 1 : -1;
           }
           // TODO eventually, deal with enums/arrays
-          totalScore += newScore;
           continue;
         }
       }
     } else if (
+      formData !== undefined &&
       typeof schema.type === "string" &&
       schema.type === typeOfValue(formData)
     ) {
@@ -199,14 +224,41 @@ function calculateIndexScore(
   return totalScore;
 }
 
+/**
+ * @deprecated use `getClosestMatchingOption2`
+ */
 export function getClosestMatchingOption(
   validator: Validator,
   rootSchema: Schema,
   formData: SchemaValue | undefined,
   options: Schema[],
   selectedOption = -1,
+  discriminatorField?: string,
+  merger = defaultMerger
+): number {
+  return getClosestMatchingOption2(
+    validator,
+    merger,
+    rootSchema,
+    formData,
+    options,
+    selectedOption,
+    discriminatorField
+  );
+}
+
+export function getClosestMatchingOption2(
+  validator: Validator,
+  merger: Merger2,
+  rootSchema: Schema,
+  formData: SchemaValue | undefined,
+  options: Schema[],
+  selectedOption = -1,
   discriminatorField?: string
 ): number {
+  if (options.length === 0) {
+    return selectedOption;
+  }
   // First resolve any refs in the options
   const resolvedOptions = options.map((option) => {
     return resolveAllReferences(option, rootSchema);
@@ -222,58 +274,59 @@ export function getClosestMatchingOption(
   }
 
   // Reduce the array of options down to a list of the indexes that are considered matching options
-  const allValidIndexes = resolvedOptions.reduce(
-    (validList: number[], option, index: number) => {
-      const testOptions = [JUNK_OPTION, option];
-      const match = getFirstMatchingOption(
+  const allValidIndexes: number[] = [];
+  const testOptions = [JUNK_OPTION, {} as Schema];
+  for (let i = 0; i < resolvedOptions.length; i++) {
+    testOptions[1] = resolvedOptions[i]!;
+    if (
+      getFirstMatchingOption(
         validator,
         formData,
         testOptions,
         rootSchema,
         discriminatorField
-      );
-      // The match is the real option, so add its index to list of valid indexes
-      if (match === 1) {
-        validList.push(index);
-      }
-      return validList;
-    },
-    []
-  );
+      ) === 1
+    ) {
+      allValidIndexes.push(i);
+    }
+  }
 
   // There is only one valid index, so return it!
   if (allValidIndexes.length === 1) {
     return allValidIndexes[0]!;
   }
-  if (!allValidIndexes.length) {
+  if (allValidIndexes.length === 0) {
     // No indexes were valid, so we'll score all the options, add all the indexes
     for (let i = 0; i < resolvedOptions.length; i++) {
       allValidIndexes.push(i);
     }
   }
-  type BestType = { bestIndex: number; bestScore: number };
   const scoreCount = new Set<number>();
+  let bestScore = 0;
+  let bestIndex = selectedOption;
   // Score all the options in the list of valid indexes and return the index with the best score
-  const { bestIndex }: BestType = allValidIndexes.reduce(
-    (scoreData: BestType, index: number) => {
-      const { bestScore } = scoreData;
-      const option = resolvedOptions[index];
-      const score = calculateIndexScore(
-        validator,
-        rootSchema,
-        option,
-        formData
-      );
-      scoreCount.add(score);
-      if (score > bestScore) {
-        return { bestIndex: index, bestScore: score };
-      }
-      return scoreData;
-    },
-    { bestIndex: selectedOption, bestScore: 0 }
-  );
+  for (let i = 0; i < allValidIndexes.length; i++) {
+    const index = allValidIndexes[i]!;
+    const option = resolvedOptions[index];
+    const score = calculateIndexScore2(
+      validator,
+      merger,
+      rootSchema,
+      option,
+      formData
+    );
+    scoreCount.add(score);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
   // if all scores are the same go with selectedOption
-  if (scoreCount.size === 1 && selectedOption >= 0) {
+  if (
+    allValidIndexes.length > 1 &&
+    scoreCount.size === 1 &&
+    selectedOption >= 0
+  ) {
     return selectedOption;
   }
 

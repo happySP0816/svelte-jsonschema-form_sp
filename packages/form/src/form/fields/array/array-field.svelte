@@ -1,16 +1,25 @@
 <script lang="ts">
   import { isFixedItems } from "@/core/index.js";
 
-  import { getFormContext } from "../../context.js";
-  import { getErrors, getUiOptions, isMultiSelect } from "../../utils.js";
-  import { isDisabledOrReadonly } from "../../is-disabled-or-readonly.js";
+  import {
+    isDisabled,
+    getField,
+    getErrors,
+    getUiOptions,
+    isMultiSelect,
+    getFormContext,
+  } from "../../context/index.js";
   import ErrorMessage from "../../error-message.svelte";
 
-  import { getField, type FieldProps } from "../model.js";
+  import type { FieldProps } from "../model.js";
 
-  import { setArrayContext, type ArrayContext } from "./context.js";
   import { isFilesArray } from "./is-files-array.js";
   import { createKeyedArray } from "./keyed-array.svelte.js";
+  import {
+    setArrayContext,
+    type ArrayContext,
+    isFilesArray,
+  } from "./context.js";
 
   let { value = $bindable(), config }: FieldProps<"array"> = $props();
 
@@ -30,17 +39,15 @@
       (config.schema.maxItems === undefined ||
         value.length < config.schema.maxItems)
   );
-  const disabledOrReadonly = $derived(
-    isDisabledOrReadonly(ctx, uiOptions?.input)
-  );
+  const disabled = $derived(isDisabled(ctx, uiOptions?.input));
   const errors = $derived(getErrors(ctx, config.idSchema));
 
   const arrayCtx: ArrayContext = {
     get errors() {
       return errors;
     },
-    get disabledOrReadonly() {
-      return disabledOrReadonly;
+    get disabled() {
+      return disabled;
     },
     get canAdd() {
       return canAdd;
