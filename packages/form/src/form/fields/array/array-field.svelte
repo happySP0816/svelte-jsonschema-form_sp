@@ -13,6 +13,8 @@
 
   import type { FieldProps } from "../model.js";
 
+  import { isFilesArray } from "./is-files-array.js";
+  import { createKeyedArray } from "./keyed-array.svelte.js";
   import {
     setArrayContext,
     type ArrayContext,
@@ -62,6 +64,7 @@
     get copyable() {
       return copyable;
     },
+    keyed: createKeyedArray(() => value),
   };
   setArrayContext(arrayCtx);
 

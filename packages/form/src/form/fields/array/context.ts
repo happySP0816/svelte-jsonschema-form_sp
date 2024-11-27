@@ -15,6 +15,8 @@ import {
 } from "../../context/index.js";
 import { type IdSchema } from "../../id-schema.js";
 
+import type { KeyedArray } from './keyed-array.svelte.js';
+
 export interface ArrayContext {
   disabled: boolean;
   canAdd: boolean;
@@ -23,6 +25,7 @@ export interface ArrayContext {
   removable: boolean;
   copyable: boolean;
   errors: ValidationError<unknown>[];
+  keyed: KeyedArray;
 }
 
 const ARRAY_CONTEXT = Symbol("array-context");

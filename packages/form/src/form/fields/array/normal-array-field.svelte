@@ -3,6 +3,7 @@
     isSchemaNullable,
     isSchemaObjectValue,
     type Schema,
+    type SchemaArrayValue,
   } from "@/core/index.js";
   
   import {
@@ -64,7 +65,7 @@
   addButton={arrayCtx.canAdd ? addButton : undefined}
 >
   {#if value}
-    {#each value as item, index}
+    {#each value as item, index (arrayCtx.keyed.key(index))}
       {@const itemSchema = retrieveSchema(ctx, schemaItems, item)}
       {@const itemIdSchema = makeIdSchema(
         ctx,
